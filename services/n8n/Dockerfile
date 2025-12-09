@@ -8,4 +8,10 @@ RUN apt-get update \
     && ln -sf /usr/bin/python3 /usr/local/bin/python \
     && python -m pip install --no-cache-dir --upgrade pip setuptools
 
+COPY scripts /mnt/scripts
+
+RUN python -m pip install --no-cache-dir -r /mnt/scripts/requirements.txt \
+    && chmod +x /mnt/scripts/images/generate.py \
+    && chown -R node:node /mnt/scripts
+
 USER node
