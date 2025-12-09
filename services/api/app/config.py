@@ -5,7 +5,7 @@ from pydantic import BaseSettings, Field, HttpUrl
 
 
 class Settings(BaseSettings):
-    external_api_base: Optional[HttpUrl] = None
+    platform_api_base: Optional[HttpUrl] = None
     request_timeout: float = 10.0
     default_headers: Dict[str, str] = Field(default_factory=dict)
 
