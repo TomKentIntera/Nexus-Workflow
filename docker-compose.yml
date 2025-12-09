@@ -2,7 +2,9 @@ version: "3.9"
 
 services:
   n8n:
-    image: n8nio/n8n:latest
+    build:
+      context: ./services/n8n
+      dockerfile: Dockerfile
     restart: unless-stopped
     ports:
       - "5678:5678"
@@ -18,6 +20,7 @@ services:
       WEBHOOK_URL: "http://localhost:5678/"
       GENERIC_TIMEZONE: "UTC"
       API_BASE_URL: "http://api:8000"
+      PYTHON_BIN: "/usr/local/bin/python"
     volumes:
       - n8n_data:/home/node/.n8n
     networks:
