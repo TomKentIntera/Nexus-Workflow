@@ -1,27 +1,24 @@
-#!/usr/bin/env python
 """
-CLI tool for generating images using Heartsync model.
-Removes Gradio UI and provides a simple command-line interface.
+Image generation module for Heartsync model.
+Provides API functions for generating images with MinIO storage integration.
 """
 
 from __future__ import annotations
 
-import argparse
 import torch
 from diffusers import StableDiffusionXLPipeline
 from PIL import Image
 import os
-from typing import Optional, List, Dict, Any
+from typing import Optional, Dict, Tuple
 from datetime import datetime
 import json
-import requests
-import base64
-from pathlib import Path
 from io import BytesIO
 from minio import Minio
 from minio.error import S3Error
+from sqlalchemy.orm import Session
+from db import RunImage, RunImageStatus
 
-# Set Hugging Face cache directory to current project folder
+# Set Hugging Face cache directory
 os.environ["HF_HOME"] = os.path.join(os.getcwd(), "hf_cache")
 os.environ["HF_HUB_CACHE"] = os.path.join(os.getcwd(), "hf_cache")
 os.environ["TRANSFORMERS_CACHE"] = os.path.join(os.getcwd(), "hf_cache")
@@ -66,7 +63,9 @@ class HeartsyncModel:
             self.pipe = self.pipe.to(self.device)
             
             print("⚡ Enabling memory efficient attention...")
-            self.pipe.enable_model_cpu_offload()
+            if self.device == "cuda":
+                self.pipe.enable_model_cpu_offload()
+            # For CPU mode, the model is already on CPU, no offload needed
             
             print("✅ Model loaded successfully!")
             print("🚀 Ready to generate images!")
@@ -90,7 +89,7 @@ class HeartsyncModel:
         seed: Optional[int] = None,
         saturation_boost: float = 1.2,
         contrast_boost: float = 1.1
-    ) -> Image.Image:
+    ) -> Tuple[Image.Image, int]:
         """Generate a single image based on the prompt."""
         if not self.loaded or self.pipe is None:
             raise RuntimeError("Model is not loaded. Please load the model first.")
@@ -104,10 +103,12 @@ class HeartsyncModel:
             
             # Set the seed for reproducible generation
             torch.manual_seed(actual_seed)
-            if torch.cuda.is_available():
+            if self.device == "cuda":
                 torch.cuda.manual_seed(actual_seed)
             
             # Generate image
+            generator = torch.Generator(device=self.device).manual_seed(actual_seed)
+            
             if self.device == "cuda":
                 with torch.autocast(self.device):
                     result = self.pipe(
@@ -118,10 +119,11 @@ class HeartsyncModel:
                         width=width,
                         height=height,
                         num_images_per_prompt=1,
-                        generator=torch.Generator(device=self.device).manual_seed(actual_seed),
+                        generator=generator,
                     )
                     image = result.images[0]
             else:
+                # CPU mode
                 result = self.pipe(
                     prompt=prompt,
                     negative_prompt=negative_prompt,
@@ -130,6 +132,7 @@ class HeartsyncModel:
                     width=width,
                     height=height,
                     num_images_per_prompt=1,
+                    generator=generator,
                 )
                 image = result.images[0]
             
@@ -234,7 +237,8 @@ class HeartsyncModel:
         # Upload to MinIO if configured
         if minio_client and minio_bucket:
             try:
-                object_name = f"runs/{run_id}/{timestamp}.png"
+                # Object name should not include bucket name (bucket is already "runs")
+                object_name = f"{run_id}/{timestamp}.png"
                 
                 # Ensure bucket exists
                 if not minio_client.bucket_exists(minio_bucket):
@@ -252,7 +256,7 @@ class HeartsyncModel:
                 
                 # Determine MinIO URI
                 if minio_public_base:
-                    minio_uri = f"{minio_public_base.rstrip('/')}/{minio_bucket}/{object_name}"
+                    minio_uri = f"{minio_public_base.rstrip('/')}/{object_name}"
                 else:
                     minio_uri = f"s3://{minio_bucket}/{object_name}"
                 
@@ -273,23 +277,24 @@ class HeartsyncModel:
         return result
 
 
-def get_minio_client(args: argparse.Namespace) -> Optional[Minio]:
-    """Create and return MinIO client if configured."""
-    if args.no_minio:
-        return None
+def get_minio_client() -> Optional[Minio]:
+    """Create and return MinIO client from environment variables."""
+    minio_endpoint = os.environ.get("MINIO_ENDPOINT")
+    minio_access_key = os.environ.get("MINIO_ACCESS_KEY")
+    minio_secret_key = os.environ.get("MINIO_SECRET_KEY")
     
-    if not (args.minio_endpoint and args.minio_access_key and args.minio_secret_key):
+    if not (minio_endpoint and minio_access_key and minio_secret_key):
         return None
     
     try:
         # Remove protocol from endpoint if present
-        endpoint = args.minio_endpoint.replace("http://", "").replace("https://", "")
-        secure = args.minio_secure or args.minio_endpoint.startswith("https://")
+        endpoint = minio_endpoint.replace("http://", "").replace("https://", "")
+        secure = minio_endpoint.startswith("https://")
         
         client = Minio(
             endpoint,
-            access_key=args.minio_access_key,
-            secret_key=args.minio_secret_key,
+            access_key=minio_access_key,
+            secret_key=minio_secret_key,
             secure=secure
         )
         return client
@@ -298,183 +303,94 @@ def get_minio_client(args: argparse.Namespace) -> Optional[Minio]:
         return None
 
 
-def post_webhook(webhook_url: str, image_path: str, run_id: str, prompt: str, minio_uri: Optional[str] = None) -> bool:
-    """Post webhook notification when image is generated."""
-    try:
-        payload = {
-            "run_id": run_id,
-            "image_path": image_path,
-            "prompt": prompt,
-            "generated_at": datetime.now().isoformat()
-        }
-        
-        if minio_uri:
-            payload["minio_uri"] = minio_uri
-        
-        response = requests.post(webhook_url, json=payload, timeout=30)
-        response.raise_for_status()
-        print(f"✅ Webhook posted successfully: {image_path}")
-        return True
-    except Exception as e:
-        print(f"⚠️  Warning: Failed to post webhook: {str(e)}")
-        return False
-
-
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Generate images using Heartsync model",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  # Generate 5 images with tags
-  python generate_cli.py --tags "beautiful landscape, detailed" --run-id run123 --num-images 5 --webhook-url http://localhost:8000/webhook
-  
-  # Generate with custom parameters
-  python generate_cli.py --tags "portrait" --run-id run456 --num-images 3 --webhook-url http://localhost:8000/webhook --steps 50 --guidance 8.0
-        """
+def save_run_image_to_db(
+    session: Session,
+    run_id: str,
+    ordinal: int,
+    asset_uri: str,
+    thumb_uri: Optional[str] = None,
+    notes: Optional[str] = None
+) -> RunImage:
+    """Save a RunImage record to the database."""
+    run_image = RunImage(
+        run_id=run_id,
+        ordinal=ordinal,
+        asset_uri=asset_uri,
+        thumb_uri=thumb_uri,
+        status=RunImageStatus.GENERATED,
+        notes=notes
     )
+    session.add(run_image)
+    session.flush()  # Flush to get the ID
+    return run_image
+
+
+def generate_images_for_run(
+    run_id: str,
+    prompt: str,
+    num_images: int = 1,
+    output_dir: str = "./generated-images",
+    negative_prompt: str = "blurry, low quality, distorted, watermark, text",
+    num_inference_steps: int = 28,
+    guidance_scale: float = 7.5,
+    width: int = 1024,
+    height: int = 1024,
+    seed: Optional[int] = None,
+    saturation_boost: float = 1.2,
+    contrast_boost: float = 1.1,
+    model_id: str = "Heartsync/NSFW-Uncensored",
+    session: Optional[Session] = None
+):
+    """
+    Generate images for a run and save RunImage records to the database.
     
-    parser.add_argument(
-        "--tags",
-        required=True,
-        help="Comma-separated list of tags/prompt for image generation"
-    )
-    parser.add_argument(
-        "--run-id",
-        required=True,
-        help="Run ID to organize generated images in folders"
-    )
-    parser.add_argument(
-        "--num-images",
-        type=int,
-        default=1,
-        help="Number of images to generate (default: 1)"
-    )
-    parser.add_argument(
-        "--webhook-url",
-        required=True,
-        help="URL to post webhook notification when image is generated"
-    )
-    parser.add_argument(
-        "--output-dir",
-        default="./generated-images",
-        help="Base output directory for images (default: ./generated-images)"
-    )
-    parser.add_argument(
-        "--negative-prompt",
-        default="blurry, low quality, distorted, watermark, text",
-        help="Negative prompt (default: 'blurry, low quality, distorted, watermark, text')"
-    )
-    parser.add_argument(
-        "--steps",
-        type=int,
-        default=28,
-        help="Number of inference steps (default: 28)"
-    )
-    parser.add_argument(
-        "--guidance",
-        type=float,
-        default=7.5,
-        help="Guidance scale (default: 7.5)"
-    )
-    parser.add_argument(
-        "--width",
-        type=int,
-        default=1024,
-        help="Image width (default: 1024)"
-    )
-    parser.add_argument(
-        "--height",
-        type=int,
-        default=1024,
-        help="Image height (default: 1024)"
-    )
-    parser.add_argument(
-        "--seed",
-        type=int,
-        default=None,
-        help="Random seed for generation (default: random)"
-    )
-    parser.add_argument(
-        "--saturation",
-        type=float,
-        default=1.2,
-        help="Saturation boost (default: 1.2)"
-    )
-    parser.add_argument(
-        "--contrast",
-        type=float,
-        default=1.1,
-        help="Contrast boost (default: 1.1)"
-    )
-    parser.add_argument(
-        "--model-id",
-        default="Heartsync/NSFW-Uncensored",
-        help="Model ID to use (default: Heartsync/NSFW-Uncensored)"
-    )
-    parser.add_argument(
-        "--minio-endpoint",
-        default=os.environ.get("MINIO_ENDPOINT", "minio:9000"),
-        help="MinIO endpoint (default: minio:9000 or MINIO_ENDPOINT env var)"
-    )
-    parser.add_argument(
-        "--minio-access-key",
-        default=os.environ.get("MINIO_ACCESS_KEY", "workflow"),
-        help="MinIO access key (default: workflow or MINIO_ACCESS_KEY env var)"
-    )
-    parser.add_argument(
-        "--minio-secret-key",
-        default=os.environ.get("MINIO_SECRET_KEY", "workflow_secret"),
-        help="MinIO secret key (default: workflow_secret or MINIO_SECRET_KEY env var)"
-    )
-    parser.add_argument(
-        "--minio-bucket",
-        default=os.environ.get("MINIO_BUCKET", "runs"),
-        help="MinIO bucket name (default: runs or MINIO_BUCKET env var)"
-    )
-    parser.add_argument(
-        "--minio-public-base",
-        default=os.environ.get("MINIO_PUBLIC_BASE"),
-        help="Optional public base URL for MinIO objects (e.g., http://localhost:9000)"
-    )
-    parser.add_argument(
-        "--minio-secure",
-        action="store_true",
-        help="Use HTTPS when connecting to MinIO"
-    )
-    parser.add_argument(
-        "--no-minio",
-        action="store_true",
-        help="Disable MinIO upload even if credentials are provided"
-    )
+    Args:
+        session: Database session (required for writing to DB)
+    """
+    from db import get_db_session
     
-    return parser.parse_args()
-
-
-def main() -> None:
-    args = parse_args()
+    # Use provided session or create a new one
+    if session is None:
+        with get_db_session() as db_session:
+            return generate_images_for_run(
+                run_id=run_id,
+                prompt=prompt,
+                num_images=num_images,
+                output_dir=output_dir,
+                negative_prompt=negative_prompt,
+                num_inference_steps=num_inference_steps,
+                guidance_scale=guidance_scale,
+                width=width,
+                height=height,
+                seed=seed,
+                saturation_boost=saturation_boost,
+                contrast_boost=contrast_boost,
+                model_id=model_id,
+                session=db_session
+            )
     
-    # Parse tags - can be comma-separated or space-separated
-    prompt = args.tags.strip()
+    prompt = prompt.strip()
     
     print(f"🎨 Starting image generation")
-    print(f"   Run ID: {args.run_id}")
+    print(f"   Run ID: {run_id}")
     print(f"   Prompt: {prompt}")
-    print(f"   Number of images: {args.num_images}")
-    print(f"   Output directory: {args.output_dir}/{args.run_id}")
+    print(f"   Number of images: {num_images}")
     print()
     
     # Initialize MinIO client if configured
-    minio_client = get_minio_client(args)
+    minio_client = get_minio_client()
+    minio_bucket = os.environ.get("MINIO_BUCKET", "runs")
+    minio_public_base = os.environ.get("MINIO_PUBLIC_BASE")
+    
     if minio_client:
-        print(f"✅ MinIO client initialized (bucket: {args.minio_bucket})")
+        print(f"✅ MinIO client initialized (bucket: {minio_bucket})")
     else:
         print("ℹ️  MinIO upload disabled (using local storage only)")
     print()
     
     # Initialize model
     print("Initializing model...")
-    model = HeartsyncModel(model_id=args.model_id)
+    model = HeartsyncModel(model_id=model_id)
     
     # Load model
     print("Loading model (this may take a while on first run)...")
@@ -482,11 +398,10 @@ def main() -> None:
     print()
     
     # Generate images
-    generated_paths = []
-    base_seed = args.seed if args.seed is not None else None
+    base_seed = seed if seed is not None else None
     
-    for i in range(args.num_images):
-        print(f"Generating image {i+1}/{args.num_images}...")
+    for i in range(num_images):
+        print(f"Generating image {i+1}/{num_images}...")
         
         # Use different seed for each image if base seed is provided
         current_seed = base_seed + i if base_seed is not None else None
@@ -495,45 +410,181 @@ def main() -> None:
             # Generate image
             image, actual_seed = model.generate_image(
                 prompt=prompt,
-                negative_prompt=args.negative_prompt,
-                num_inference_steps=args.steps,
-                guidance_scale=args.guidance,
-                width=args.width,
-                height=args.height,
+                negative_prompt=negative_prompt,
+                num_inference_steps=num_inference_steps,
+                guidance_scale=guidance_scale,
+                width=width,
+                height=height,
                 seed=current_seed,
-                saturation_boost=args.saturation,
-                contrast_boost=args.contrast
+                saturation_boost=saturation_boost,
+                contrast_boost=contrast_boost
             )
             
             # Save image with metadata and upload to MinIO if configured
             save_result = model.save_image_with_metadata(
                 image=image,
                 prompt=prompt,
-                negative_prompt=args.negative_prompt,
-                num_inference_steps=args.steps,
-                guidance_scale=args.guidance,
-                width=args.width,
-                height=args.height,
+                negative_prompt=negative_prompt,
+                num_inference_steps=num_inference_steps,
+                guidance_scale=guidance_scale,
+                width=width,
+                height=height,
                 seed=actual_seed,
-                saturation_boost=args.saturation,
-                contrast_boost=args.contrast,
-                run_id=args.run_id,
-                output_dir=args.output_dir,
+                saturation_boost=saturation_boost,
+                contrast_boost=contrast_boost,
+                run_id=run_id,
+                output_dir=output_dir,
                 minio_client=minio_client,
-                minio_bucket=args.minio_bucket if minio_client else None,
-                minio_public_base=args.minio_public_base
+                minio_bucket=minio_bucket if minio_client else None,
+                minio_public_base=minio_public_base
+            )
+            
+            image_path = save_result["local_path"]
+            minio_uri = save_result.get("minio_uri")
+            
+            # Use MinIO URI if available, otherwise use local path
+            asset_uri = minio_uri if minio_uri else image_path
+            
+            # Save to database
+            run_image = save_run_image_to_db(
+                session=session,
+                run_id=run_id,
+                ordinal=i + 1,  # 1-indexed
+                asset_uri=asset_uri,
+                thumb_uri=None,  # Could generate thumbnail later
+                notes=None
+            )
+            
+            print(f"✅ Image {i+1} saved: {image_path}")
+            if minio_uri:
+                print(f"   MinIO URI: {minio_uri}")
+            print(f"   Database record created: {run_image.id}")
+            print()
+            
+        except Exception as e:
+            print(f"❌ Error generating image {i+1}: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            continue
+    
+    print(f"🎉 Generation complete!")
+    print(f"   Run ID: {run_id}")
+    print()
+
+
+def generate_images(
+    prompt: str,
+    run_id: str,
+    num_images: int = 1,
+    webhook_url: str = "",
+    output_dir: str = "./generated-images",
+    negative_prompt: str = "blurry, low quality, distorted, watermark, text",
+    num_inference_steps: int = 28,
+    guidance_scale: float = 7.5,
+    width: int = 1024,
+    height: int = 1024,
+    seed: Optional[int] = None,
+    saturation_boost: float = 1.2,
+    contrast_boost: float = 1.1,
+    model_id: str = "Heartsync/NSFW-Uncensored"
+) -> Dict[str, any]:
+    """
+    Generate images using the Heartsync model.
+    
+    Returns:
+        Dict with 'generated_paths' (list of local paths) and 'results' (list of result dicts)
+    """
+    prompt = prompt.strip()
+    
+    print(f"🎨 Starting image generation")
+    print(f"   Run ID: {run_id}")
+    print(f"   Prompt: {prompt}")
+    print(f"   Number of images: {num_images}")
+    print(f"   Output directory: {output_dir}/{run_id}")
+    print()
+    
+    # Initialize MinIO client if configured
+    minio_client = get_minio_client()
+    minio_bucket = os.environ.get("MINIO_BUCKET", "runs")
+    minio_public_base = os.environ.get("MINIO_PUBLIC_BASE")
+    
+    if minio_client:
+        print(f"✅ MinIO client initialized (bucket: {minio_bucket})")
+    else:
+        print("ℹ️  MinIO upload disabled (using local storage only)")
+    print()
+    
+    # Initialize model
+    print("Initializing model...")
+    model = HeartsyncModel(model_id=model_id)
+    
+    # Load model
+    print("Loading model (this may take a while on first run)...")
+    model.load_model()
+    print()
+    
+    # Generate images
+    generated_paths = []
+    results = []
+    base_seed = seed if seed is not None else None
+    
+    for i in range(num_images):
+        print(f"Generating image {i+1}/{num_images}...")
+        
+        # Use different seed for each image if base seed is provided
+        current_seed = base_seed + i if base_seed is not None else None
+        
+        try:
+            # Generate image
+            image, actual_seed = model.generate_image(
+                prompt=prompt,
+                negative_prompt=negative_prompt,
+                num_inference_steps=num_inference_steps,
+                guidance_scale=guidance_scale,
+                width=width,
+                height=height,
+                seed=current_seed,
+                saturation_boost=saturation_boost,
+                contrast_boost=contrast_boost
+            )
+            
+            # Save image with metadata and upload to MinIO if configured
+            save_result = model.save_image_with_metadata(
+                image=image,
+                prompt=prompt,
+                negative_prompt=negative_prompt,
+                num_inference_steps=num_inference_steps,
+                guidance_scale=guidance_scale,
+                width=width,
+                height=height,
+                seed=actual_seed,
+                saturation_boost=saturation_boost,
+                contrast_boost=contrast_boost,
+                run_id=run_id,
+                output_dir=output_dir,
+                minio_client=minio_client,
+                minio_bucket=minio_bucket if minio_client else None,
+                minio_public_base=minio_public_base
             )
             
             image_path = save_result["local_path"]
             minio_uri = save_result.get("minio_uri")
             
             generated_paths.append(image_path)
+            result_item = {
+                "local_path": image_path,
+                "minio_uri": minio_uri,
+                "seed": actual_seed
+            }
+            results.append(result_item)
+            
             print(f"✅ Image {i+1} saved: {image_path}")
             if minio_uri:
                 print(f"   MinIO URI: {minio_uri}")
             
-            # Post webhook
-            post_webhook(args.webhook_url, image_path, args.run_id, prompt, minio_uri)
+            # Post webhook if URL provided
+            if webhook_url:
+                post_webhook(webhook_url, image_path, run_id, prompt, minio_uri)
             print()
             
         except Exception as e:
@@ -541,13 +592,16 @@ def main() -> None:
             continue
     
     print(f"🎉 Generation complete!")
-    print(f"   Generated {len(generated_paths)}/{args.num_images} images")
-    print(f"   All images saved to: {os.path.join(args.output_dir, args.run_id)}")
+    print(f"   Generated {len(generated_paths)}/{num_images} images")
+    print(f"   All images saved to: {os.path.join(output_dir, run_id)}")
     
-    if len(generated_paths) < args.num_images:
-        print(f"⚠️  Warning: Only {len(generated_paths)} out of {args.num_images} images were generated successfully")
-
-
-if __name__ == "__main__":
-    main()
+    if len(generated_paths) < num_images:
+        print(f"⚠️  Warning: Only {len(generated_paths)} out of {num_images} images were generated successfully")
+    
+    return {
+        "generated_paths": generated_paths,
+        "results": results,
+        "success_count": len(generated_paths),
+        "requested_count": num_images
+    }
 

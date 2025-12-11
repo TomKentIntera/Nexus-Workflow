@@ -92,4 +92,3 @@ class RunImageApproval(Base):
     webhook_last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     run_image: Mapped[RunImage] = relationship("RunImage", back_populates="approvals")
-*** End of File

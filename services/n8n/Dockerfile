@@ -10,6 +10,7 @@ COPY scripts /mnt/scripts
 
 RUN python -m pip install --no-cache-dir --break-system-packages -r /mnt/scripts/requirements.txt \
     && chmod +x /mnt/scripts/images/generate.py \
+    && chmod +x /mnt/scripts/images/generate_cli.py \
     && chown -R node:node /mnt/scripts
 
 USER node

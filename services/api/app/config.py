@@ -1,7 +1,8 @@
 from functools import lru_cache
 from typing import Dict, Optional
 
-from pydantic import AnyHttpUrl, BaseSettings, Field, HttpUrl
+from pydantic import AnyHttpUrl, Field, HttpUrl
+from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
