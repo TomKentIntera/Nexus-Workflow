@@ -4,13 +4,10 @@ from typing import Dict, List, Optional
 
 import gradio as gr
 import httpx
-from fastapi import FastAPI
-from gradio.routes import mount_gradio_app
 
 from .config import get_settings
 
 settings = get_settings()
-app = FastAPI(title="Reviewer UI", version="0.1.0")
 
 
 def _api_client() -> httpx.Client:
@@ -201,9 +198,22 @@ def build_interface() -> gr.Blocks:
 
 
 demo = build_interface()
-app = mount_gradio_app(app, demo, path="/")
 
+# Workaround for Gradio 4.44.x bug in API info generation
+# Patch the api_info function to catch the TypeError
+from gradio import routes as gradio_routes
+original_api_info = gradio_routes.api_info
 
-@app.get("/healthz", tags=["health"])
-async def health_check() -> Dict[str, str]:
-    return {"status": "ok"}
+def patched_api_info(show_docs: bool = True):
+    try:
+        return original_api_info(show_docs)
+    except TypeError as e:
+        if "argument of type 'bool' is not iterable" in str(e):
+            # Return empty API info to avoid the crash
+            return {}
+        raise
+
+gradio_routes.api_info = patched_api_info
+
+# Use Gradio's app
+app = demo.app

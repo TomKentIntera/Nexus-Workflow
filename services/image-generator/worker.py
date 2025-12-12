@@ -9,16 +9,24 @@ import traceback
 import json
 from typing import Optional
 from db import get_db_session, Run, RunImage, RunStatus, RunImageStatus
-from generator import generate_images_for_run
+from generator import generate_images_for_run, HeartsyncModel
 
 
 def process_queued_runs():
     """Poll for QUEUED runs and process them."""
     poll_interval = int(os.environ.get("WORKER_POLL_INTERVAL", "5"))  # seconds
+    model_id = os.environ.get("MODEL_ID", "Heartsync/NSFW-Uncensored")
     
     print("🚀 Image Generation Worker started")
     print(f"   Polling every {poll_interval} seconds")
     print(f"   Looking for runs with status: QUEUED")
+    print()
+    
+    # Load model once at startup
+    print("🔄 Initializing model (this may take a while on first run)...")
+    model = HeartsyncModel(model_id=model_id)
+    model.load_model()
+    print("✅ Model loaded and ready!")
     print()
     
     while True:
@@ -39,25 +47,44 @@ def process_queued_runs():
                     session.commit()
                     
                     try:
-                        # Parse parameters from parameter_blob (already JSON in database)
-                        parameters = run.parameter_blob if run.parameter_blob else {}
+                        # Parse parameters from parameter_blob
+                        # Handle both dict (from SQLAlchemy JSON) and string (raw JSON)
+                        parameter_blob = run.parameter_blob
+                        if isinstance(parameter_blob, str):
+                            try:
+                                parameters = json.loads(parameter_blob)
+                            except (json.JSONDecodeError, TypeError):
+                                print(f"⚠️  Warning: Could not parse parameter_blob as JSON, using defaults")
+                                parameters = {}
+                        elif isinstance(parameter_blob, dict):
+                            parameters = parameter_blob
+                        else:
+                            parameters = {}
                         
-                        # Extract generation parameters
-                        num_images = parameters.get("num_images", 1)
+                        # Extract generation parameters from parameter_blob
+                        num_images = int(parameters.get("image_count", 1))
+                        width = int(parameters.get("width", 1024))
+                        height = int(parameters.get("height", 1024))
                         negative_prompt = parameters.get("negative_prompt", "blurry, low quality, distorted, watermark, text")
-                        num_inference_steps = parameters.get("steps", 28)
-                        guidance_scale = parameters.get("guidance", 7.5)
-                        width = parameters.get("width", 1024)
-                        height = parameters.get("height", 1024)
+                        num_inference_steps = int(parameters.get("steps", 28))
+                        guidance_scale = float(parameters.get("guidance", 7.5))
                         seed = parameters.get("seed")
-                        saturation = parameters.get("saturation", 1.2)
-                        contrast = parameters.get("contrast", 1.1)
-                        model_id = parameters.get("model_id", "Heartsync/NSFW-Uncensored")
+                        if seed is not None:
+                            seed = int(seed)
+                        saturation = float(parameters.get("saturation", 1.2))
+                        contrast = float(parameters.get("contrast", 1.1))
                         
-                        print(f"   Generating {num_images} image(s)...")
+                        print(f"   Extracted parameters from parameter_blob:")
+                        print(f"     - image_count: {num_images}")
+                        print(f"     - width: {width}")
+                        print(f"     - height: {height}")
+                        print(f"     - steps: {num_inference_steps}")
+                        print(f"     - guidance: {guidance_scale}")
+                        print(f"   Generating {num_images} image(s) at {width}x{height}...")
                         
-                        # Generate images
+                        # Generate images (reuse the pre-loaded model)
                         generate_images_for_run(
+                            model=model,
                             run_id=run.id,
                             prompt=run.prompt,
                             num_images=num_images,
@@ -69,7 +96,6 @@ def process_queued_runs():
                             seed=seed,
                             saturation_boost=saturation,
                             contrast_boost=contrast,
-                            model_id=model_id,
                             session=session
                         )
                         

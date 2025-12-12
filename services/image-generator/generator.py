@@ -326,11 +326,12 @@ def save_run_image_to_db(
 
 
 def generate_images_for_run(
+    model: HeartsyncModel,
     run_id: str,
     prompt: str,
     num_images: int = 1,
     output_dir: str = "./generated-images",
-    negative_prompt: str = "blurry, low quality, distorted, watermark, text",
+    negative_prompt: str = "blurry, low quality, distorted, watermark, text, speech bubble, six fingers",
     num_inference_steps: int = 28,
     guidance_scale: float = 7.5,
     width: int = 1024,
@@ -338,13 +339,13 @@ def generate_images_for_run(
     seed: Optional[int] = None,
     saturation_boost: float = 1.2,
     contrast_boost: float = 1.1,
-    model_id: str = "Heartsync/NSFW-Uncensored",
     session: Optional[Session] = None
 ):
     """
     Generate images for a run and save RunImage records to the database.
     
     Args:
+        model: Pre-loaded HeartsyncModel instance (reused across runs)
         session: Database session (required for writing to DB)
     """
     from db import get_db_session
@@ -353,6 +354,7 @@ def generate_images_for_run(
     if session is None:
         with get_db_session() as db_session:
             return generate_images_for_run(
+                model=model,
                 run_id=run_id,
                 prompt=prompt,
                 num_images=num_images,
@@ -365,7 +367,6 @@ def generate_images_for_run(
                 seed=seed,
                 saturation_boost=saturation_boost,
                 contrast_boost=contrast_boost,
-                model_id=model_id,
                 session=db_session
             )
     
@@ -375,6 +376,8 @@ def generate_images_for_run(
     print(f"   Run ID: {run_id}")
     print(f"   Prompt: {prompt}")
     print(f"   Number of images: {num_images}")
+    print(f"   Dimensions: {width}x{height}")
+    print(f"   Steps: {num_inference_steps}, Guidance: {guidance_scale}")
     print()
     
     # Initialize MinIO client if configured
@@ -386,15 +389,6 @@ def generate_images_for_run(
         print(f"✅ MinIO client initialized (bucket: {minio_bucket})")
     else:
         print("ℹ️  MinIO upload disabled (using local storage only)")
-    print()
-    
-    # Initialize model
-    print("Initializing model...")
-    model = HeartsyncModel(model_id=model_id)
-    
-    # Load model
-    print("Loading model (this may take a while on first run)...")
-    model.load_model()
     print()
     
     # Generate images
