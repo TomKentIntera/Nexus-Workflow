@@ -17,6 +17,14 @@ class Settings(BaseSettings):
     minio_secret_key: Optional[str] = None
     n8n_approval_webhook: Optional[AnyHttpUrl] = None
 
+    # WD1.4 (SmilingWolf wd-v1-4-convnext-tagger) autotagging settings
+    wd14_repo_id: str = "SmilingWolf/wd-v1-4-convnext-tagger"
+    wd14_model_filename: str = "model.onnx"
+    wd14_tags_filename: str = "selected_tags.csv"
+    wd14_cache_dir: str = "/tmp/wd14_cache"
+    wd14_general_threshold: float = 0.35
+    wd14_character_threshold: float = 0.85
+
     class Config:
         env_prefix = "WF_"
         env_file = ".env"

@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 
+from .api.autotag import router as autotag_router
 from .api.platform import router as platform_router
 from .api.runs import router as runs_router
 from .database import Base, engine
@@ -19,3 +20,4 @@ async def health_check() -> dict[str, str]:
 
 app.include_router(platform_router)
 app.include_router(runs_router)
+app.include_router(autotag_router)
