@@ -1,219 +1,184 @@
 from __future__ import annotations
 
 from typing import Dict, List, Optional
+import os
 
-import gradio as gr
 import httpx
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
+from minio import Minio
+from minio.error import S3Error
 
 from .config import get_settings
 
 settings = get_settings()
+app = FastAPI(title="Reviewer UI", version="0.2.0")
+
+# Enable CORS for the frontend
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
-def _api_client() -> httpx.Client:
-    return httpx.Client(base_url=settings.api_base_url, timeout=settings.request_timeout)
+def get_minio_client() -> Optional[Minio]:
+    """Get MinIO client if configured."""
+    endpoint = os.environ.get("MINIO_ENDPOINT")
+    access_key = os.environ.get("MINIO_ACCESS_KEY")
+    secret_key = os.environ.get("MINIO_SECRET_KEY")
+    
+    if endpoint and access_key and secret_key:
+        try:
+            # Remove protocol if present
+            if "://" in endpoint:
+                endpoint = endpoint.split("://")[1]
+            return Minio(endpoint, access_key=access_key, secret_key=secret_key, secure=False)
+        except Exception as e:
+            print(f"Warning: Failed to create MinIO client: {e}")
+            return None
+    return None
 
 
-def _fetch_runs() -> List[Dict]:
+@app.get("/api/images/{bucket}/{path:path}", tags=["api"])
+async def proxy_image(bucket: str, path: str):
+    """Proxy MinIO images with authentication."""
+    minio_client = get_minio_client()
+    if not minio_client:
+        raise HTTPException(status_code=503, detail="MinIO not configured")
+    
     try:
-        with _api_client() as client:
-            response = client.get("/runs")
-            response.raise_for_status()
-            data = response.json()
-            return data.get("runs", [])
-    except httpx.HTTPError as exc:  # pragma: no cover - network issues
-        print(f"[reviewer] failed to fetch runs: {exc}")
-        return []
+        from io import BytesIO
+        response = minio_client.get_object(bucket, path)
+        # Read the entire object into memory (for small images this is fine)
+        image_data = response.read()
+        response.close()
+        response.release_conn()
+        
+        # Determine content type from file extension
+        content_type = "image/png"
+        if path.lower().endswith(('.jpg', '.jpeg')):
+            content_type = "image/jpeg"
+        elif path.lower().endswith('.gif'):
+            content_type = "image/gif"
+        elif path.lower().endswith('.webp'):
+            content_type = "image/webp"
+        
+        return StreamingResponse(
+            BytesIO(image_data),
+            media_type=content_type,
+            headers={
+                "Cache-Control": "public, max-age=3600",
+                "Content-Length": str(len(image_data))
+            }
+        )
+    except S3Error as e:
+        if e.code == "NoSuchKey":
+            raise HTTPException(status_code=404, detail=f"Image not found: {path}")
+        raise HTTPException(status_code=500, detail=f"MinIO error: {e}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching image: {e}")
 
 
-def _fetch_run(run_id: str) -> Optional[Dict]:
+def _api_client() -> httpx.AsyncClient:
+    return httpx.AsyncClient(base_url=settings.api_base_url, timeout=settings.request_timeout)
+
+
+@app.get("/api/runs", tags=["api"])
+async def get_runs() -> Dict[str, List[Dict]]:
+    """Get all runs."""
     try:
-        with _api_client() as client:
-            response = client.get(f"/runs/{run_id}")
-            if response.status_code == 404:
-                return None
+        async with _api_client() as client:
+            response = await client.get("/runs")
             response.raise_for_status()
             return response.json()
-    except httpx.HTTPError as exc:  # pragma: no cover
-        print(f"[reviewer] failed to fetch run {run_id}: {exc}")
-        return None
-
-
-def refresh_runs(current_value: Optional[str] = None) -> gr.Dropdown:
-    runs = _fetch_runs()
-    choices = [run["id"] for run in runs]
-    selected = current_value if current_value in choices else (choices[0] if choices else None)
-    return gr.Dropdown.update(choices=choices, value=selected)
-
-
-def load_run_details(run_id: Optional[str]):
-    if not run_id:
-        return (
-            "Select a run to view its images.",
-            [],
-            gr.CheckboxGroup.update(choices=[], value=[]),
-            [],
-            {},
+    except httpx.ConnectError as exc:
+        raise HTTPException(
+            status_code=503, 
+            detail=f"Cannot connect to API service at {settings.api_base_url}. Is the API service running?"
         )
-
-    run = _fetch_run(run_id)
-    if not run:
-        return (
-            f"Run {run_id} not found.",
-            [],
-            gr.CheckboxGroup.update(choices=[], value=[]),
-            [],
-            {},
-        )
-
-    gallery_items = []
-    checkbox_labels: List[str] = []
-    lookup: Dict[str, str] = {}
-    table_rows: List[List[str | int]] = []
-
-    for image in sorted(run.get("images", []), key=lambda item: item.get("ordinal", 0)):
-        caption = f"#{image['ordinal']} - {image['status']}"
-        gallery_items.append([image.get("asset_uri"), caption])
-        label = f"#{image['ordinal']} - {image['status'].upper()} ({image['id'][:8]})"
-        checkbox_labels.append(label)
-        lookup[label] = image["id"]
-        table_rows.append(
-            [
-                image["id"],
-                image.get("ordinal"),
-                image.get("status"),
-                image.get("asset_uri"),
-            ]
-        )
-
-    status_md = (
-        f"### Run {run['id']}\n"
-        f"- **Status:** {run['status']}\n"
-        f"- **Prompt:** {run['prompt']}\n"
-        f"- **Images:** {len(run.get('images', []))}"
-    )
-
-    return (
-        status_md,
-        gallery_items,
-        gr.CheckboxGroup.update(choices=checkbox_labels, value=[]),
-        table_rows,
-        lookup,
-    )
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to fetch runs: {exc}")
 
 
-def approve_selected(
-    run_id: Optional[str],
-    selections: Optional[List[str]],
-    approved_by: Optional[str],
-    notes: Optional[str],
-    lookup: Dict[str, str],
-) -> str:
-    if not run_id:
-        return "Please select a run before approving images."
-
-    selections = selections or []
-    if not selections:
-        return "Select at least one image to approve."
-
-    reviewer = (approved_by or settings.default_approver).strip()
-    if not reviewer:
-        return "Provide the reviewer name to continue."
-
-    image_ids = [lookup.get(label) for label in selections]
-    image_ids = [image_id for image_id in image_ids if image_id]
-    if not image_ids:
-        return "No matching images found for the current selection. Refresh the run and try again."
-
-    successes = 0
-    failures: List[str] = []
-    with _api_client() as client:
-        for image_id in image_ids:
-            try:
-                response = client.post(
-                    f"/runs/{run_id}/images/{image_id}/approve",
-                    json={"approved_by": reviewer, "notes": notes},
-                )
-                response.raise_for_status()
-                successes += 1
-            except httpx.HTTPError as exc:
-                failures.append(f"{image_id[:8]}... ({exc})")
-
-    message = f"Approved {successes} image(s)."
-    if failures:
-        message += " Failed: " + ", ".join(failures)
-    return message
-
-
-def build_interface() -> gr.Blocks:
-    with gr.Blocks(title="Image Reviewer") as demo:
-        gr.Markdown("# Image Reviewer\nMonitor workflow runs and approve generated images.")
-
-        with gr.Row():
-            run_dropdown = gr.Dropdown(label="Run", interactive=True)
-            refresh_button = gr.Button("Refresh", variant="secondary")
-
-        run_summary = gr.Markdown("Select a run to view its details.")
-        gallery = gr.Gallery(label="Images", show_label=True, columns=5, height=400, value=[])
-        image_table = gr.Dataframe(
-            headers=["Image ID", "Ordinal", "Status", "Asset URI"],
-            interactive=False,
-            label="Image details",
-            value=[],
-        )
-
-        selection_box = gr.CheckboxGroup(label="Images to approve", interactive=True)
-        approver = gr.Textbox(label="Approved by", value=settings.default_approver)
-        notes = gr.Textbox(label="Notes", lines=2, placeholder="Optional notes for webhook consumers")
-        approve_button = gr.Button("Approve Selected", variant="primary")
-        status_text = gr.Markdown()
-        image_state = gr.State({})
-
-        demo.load(refresh_runs, inputs=[run_dropdown], outputs=[run_dropdown])
-        demo.load(load_run_details, inputs=[run_dropdown], outputs=[run_summary, gallery, selection_box, image_table, image_state])
-
-        run_dropdown.change(
-            load_run_details,
-            inputs=[run_dropdown],
-            outputs=[run_summary, gallery, selection_box, image_table, image_state],
-        )
-
-        refresh_button.click(refresh_runs, inputs=[run_dropdown], outputs=[run_dropdown]).then(
-            load_run_details,
-            inputs=[run_dropdown],
-            outputs=[run_summary, gallery, selection_box, image_table, image_state],
-        )
-
-        approve_button.click(
-            approve_selected,
-            inputs=[run_dropdown, selection_box, approver, notes, image_state],
-            outputs=[status_text],
-        ).then(
-            load_run_details,
-            inputs=[run_dropdown],
-            outputs=[run_summary, gallery, selection_box, image_table, image_state],
-        )
-
-    return demo
-
-
-demo = build_interface()
-
-# Workaround for Gradio 4.44.x bug in API info generation
-# Patch the api_info function to catch the TypeError
-from gradio import routes as gradio_routes
-original_api_info = gradio_routes.api_info
-
-def patched_api_info(show_docs: bool = True):
+@app.get("/api/runs/{run_id}", tags=["api"])
+async def get_run(run_id: str) -> Dict:
+    """Get a specific run with images."""
     try:
-        return original_api_info(show_docs)
-    except TypeError as e:
-        if "argument of type 'bool' is not iterable" in str(e):
-            # Return empty API info to avoid the crash
-            return {}
-        raise
+        async with _api_client() as client:
+            response = await client.get(f"/runs/{run_id}")
+            if response.status_code == 404:
+                raise HTTPException(status_code=404, detail="Run not found")
+            response.raise_for_status()
+            return response.json()
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to fetch run: {exc}")
 
-gradio_routes.api_info = patched_api_info
 
-# Use Gradio's app
-app = demo.app
+@app.post("/api/runs/{run_id}/images/{image_id}/approve", tags=["api"])
+async def approve_image(run_id: str, image_id: str) -> Dict:
+    """Approve an image."""
+    try:
+        async with _api_client() as client:
+            response = await client.post(
+                f"/runs/{run_id}/images/{image_id}/approve",
+                json={"approved_by": "user", "notes": None},
+            )
+            response.raise_for_status()
+            return response.json()
+    except httpx.ConnectError as exc:
+        raise HTTPException(
+            status_code=503, 
+            detail=f"Cannot connect to API service at {settings.api_base_url}. Is the API service running?"
+        )
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to approve image: {exc}")
+
+
+@app.post("/api/runs/{run_id}/images/{image_id}/reject", tags=["api"])
+async def reject_image(run_id: str, image_id: str) -> Dict:
+    """Reject an image."""
+    try:
+        async with _api_client() as client:
+            response = await client.post(
+                f"/runs/{run_id}/images/{image_id}/reject",
+                json={"approved_by": "user", "notes": None},
+            )
+            response.raise_for_status()
+            return response.json()
+    except httpx.ConnectError as exc:
+        raise HTTPException(
+            status_code=503, 
+            detail=f"Cannot connect to API service at {settings.api_base_url}. Is the API service running?"
+        )
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to reject image: {exc}")
+
+
+@app.get("/", response_class=HTMLResponse)
+async def index():
+    """Serve the reviewer UI."""
+    import os
+    from pathlib import Path
+    
+    # Try to read from mounted static file first (dev mode)
+    static_path = Path("/app/static/index.html")
+    if static_path.exists():
+        with open(static_path, "r", encoding="utf-8") as f:
+            return f.read()
+    
+    # Fallback to embedded HTML (production mode)
+    embedded_path = Path(__file__).parent.parent / "static" / "index.html"
+    if embedded_path.exists():
+        with open(embedded_path, "r", encoding="utf-8") as f:
+            return f.read()
+    
+    # Last resort: return a simple error message
+    return HTMLResponse(
+        content="<h1>Error: index.html not found</h1>",
+        status_code=500
+    )

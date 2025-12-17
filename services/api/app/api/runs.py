@@ -153,4 +153,26 @@ def approve_run_image(
         image_id=image.id,
         webhook_status=approval.webhook_status.value,
     )
-*** End of File
+
+
+@router.post("/{run_id}/images/{image_id}/reject", response_model=dict)
+def reject_run_image(
+    run_id: str,
+    image_id: str,
+    payload: RunImageApprovalRequest,
+    session: Session = Depends(get_session),
+) -> dict:
+    """Reject a run image."""
+    image = _get_run_image(session, run_id, image_id)
+    image.status = RunImageStatus.REJECTED
+    image.notes = payload.notes or image.notes
+    image.run.updated_at = datetime.utcnow()
+    session.add(image)
+    session.commit()
+    session.refresh(image)
+    
+    return {
+        "image_id": image.id,
+        "status": image.status.value,
+        "message": "Image rejected successfully"
+    }

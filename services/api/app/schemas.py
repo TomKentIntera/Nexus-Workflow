@@ -65,4 +65,3 @@ class RunImageApprovalResponse(BaseModel):
     approval_id: str
     image_id: str
     webhook_status: str
-*** End of File

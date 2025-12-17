@@ -73,6 +73,7 @@ def process_queued_runs():
                             seed = int(seed)
                         saturation = float(parameters.get("saturation", 1.2))
                         contrast = float(parameters.get("contrast", 1.1))
+                        watermark_width = int(parameters.get("watermark_width", 300))
                         
                         print(f"   Extracted parameters from parameter_blob:")
                         print(f"     - image_count: {num_images}")
@@ -80,6 +81,7 @@ def process_queued_runs():
                         print(f"     - height: {height}")
                         print(f"     - steps: {num_inference_steps}")
                         print(f"     - guidance: {guidance_scale}")
+                        print(f"     - watermark_width: {watermark_width}")
                         print(f"   Generating {num_images} image(s) at {width}x{height}...")
                         
                         # Generate images (reuse the pre-loaded model)
@@ -96,6 +98,7 @@ def process_queued_runs():
                             seed=seed,
                             saturation_boost=saturation,
                             contrast_boost=contrast,
+                            watermark_width=watermark_width,
                             session=session
                         )
                         

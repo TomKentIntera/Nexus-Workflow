@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Image Reviewer</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: #f5f5f5;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 8px;
+            padding: 24px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 { margin-bottom: 24px; color: #333; }
+        .controls {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 24px;
+            flex-wrap: wrap;
+        }
+        select, input, button {
+            padding: 10px 16px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        select { flex: 1; min-width: 200px; }
+        input { flex: 1; min-width: 150px; }
+        button {
+            color: white;
+            border: none;
+            cursor: pointer;
+            font-weight: 500;
+        }
+        button.approve { background: #28a745; }
+        button.approve:hover { background: #218838; }
+        button.reject { background: #dc3545; }
+        button.reject:hover { background: #c82333; }
+        button:disabled { background: #ccc; cursor: not-allowed; }
+        .run-info {
+            background: #f8f9fa;
+            padding: 16px;
+            border-radius: 4px;
+            margin-bottom: 24px;
+        }
+        .run-info h2 { margin-bottom: 8px; color: #333; }
+        .run-info p { color: #666; margin: 4px 0; }
+        .gallery {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+        .image-card {
+            border: 2px solid #ddd;
+            border-radius: 4px;
+            overflow: hidden;
+            transition: all 0.2s;
+            position: relative;
+        }
+        .image-card:hover { border-color: #007bff; }
+        .image-card.selected { border-color: #007bff; background: #e7f3ff; }
+        .image-card img {
+            width: 100%;
+            height: 200px;
+            object-fit: cover;
+            display: block;
+            cursor: pointer;
+        }
+        .image-card .checkbox {
+            position: absolute;
+            top: 8px;
+            left: 8px;
+            width: 24px;
+            height: 24px;
+            background: white;
+            border: 2px solid #007bff;
+            border-radius: 4px;
+            cursor: pointer;
+            z-index: 10;
+        }
+        .image-card.selected .checkbox::after {
+            content: '✓';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #007bff;
+            font-weight: bold;
+        }
+        .image-card .info {
+            padding: 8px;
+            font-size: 12px;
+            color: #666;
+        }
+        .image-card .status-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            pointer-events: none;
+            z-index: 5;
+        }
+        .image-card.approved .status-overlay {
+            background: rgba(40, 167, 69, 0.3);
+        }
+        .image-card.rejected .status-overlay {
+            background: rgba(220, 53, 69, 0.5);
+        }
+        .image-card.posted .status-overlay {
+            background: rgba(0, 123, 255, 0.3);
+        }
+        .image-card .status-label {
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 8px 16px;
+            border-radius: 4px;
+            font-weight: bold;
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .image-card.approved .status-label {
+            background: rgba(40, 167, 69, 0.95);
+            color: white;
+        }
+        .image-card.rejected .status-label {
+            background: rgba(220, 53, 69, 0.95);
+            color: white;
+        }
+        .image-card.posted .status-label {
+            background: rgba(0, 123, 255, 0.95);
+            color: white;
+        }
+        .lightbox {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.9);
+            z-index: 1000;
+            cursor: pointer;
+        }
+        .lightbox.active { display: flex; align-items: center; justify-content: center; }
+        .lightbox img {
+            max-width: 90%;
+            max-height: 90%;
+            object-fit: contain;
+        }
+        .status {
+            padding: 8px 12px;
+            border-radius: 4px;
+            margin-top: 16px;
+            display: none;
+        }
+        .status.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Image Reviewer</h1>
+        <div class="controls">
+            <select id="runSelect">
+                <option value="">Loading runs...</option>
+            </select>
+            <button onclick="refreshRuns()">Refresh</button>
+            <button class="approve" onclick="approveSelected()">Approve Selected</button>
+            <button class="reject" onclick="rejectSelected()">Reject Selected</button>
+        </div>
+        <div id="runInfo" style="display: none;">
+            <div class="run-info">
+                <h2 id="runId"></h2>
+                <p><strong>Prompt:</strong> <span id="runPrompt"></span></p>
+                <p><strong>Status:</strong> <span id="runStatus"></span></p>
+                <p><strong>Images:</strong> <span id="imageCount"></span></p>
+            </div>
+            <div class="gallery" id="gallery"></div>
+        </div>
+        <div id="status" class="status"></div>
+        <div id="loading" class="loading" style="display: none;">Loading...</div>
+    </div>
+    <div class="lightbox" id="lightbox" onclick="closeLightbox()">
+        <img id="lightboxImage" src="" alt="">
+    </div>
+
+    <script>
+        let selectedImages = new Set();
+        let currentRunId = null;
+        let imageMap = {};
+
+        function convertUrl(url) {
+            if (url.startsWith('s3://')) {
+                // Convert s3://bucket/path to /api/images/bucket/path
+                const match = url.match(/^s3:\/\/([^\/]+)\/(.+)$/);
+                if (match) {
+                    const bucket = match[1];
+                    const path = match[2];
+                    return `/api/images/${bucket}/${path}`;
+                }
+            }
+            // If it's already an HTTP URL (MinIO public URL), extract bucket and path
+            // Format: http://host:port/bucket/path/to/file
+            if (url.includes('localhost:9000') || url.includes('minio:9000') || url.match(/^https?:\/\//)) {
+                // Parse the URL to extract bucket and path
+                try {
+                    const urlObj = new URL(url);
+                    // Remove leading slash and split
+                    const pathParts = urlObj.pathname.split('/').filter(p => p);
+                    if (pathParts.length >= 2) {
+                        const bucket = pathParts[0]; // First part is bucket (e.g., "runs")
+                        const path = pathParts.slice(1).join('/'); // Rest is the path
+                        return `/api/images/${bucket}/${path}`;
+                    }
+                } catch (e) {
+                    // Fallback to regex if URL parsing fails
+                    const match = url.match(/\/\/(?:[^\/]+)\/([^\/]+)\/(.+)$/);
+                    if (match) {
+                        const bucket = match[1];
+                        const path = match[2];
+                        return `/api/images/${bucket}/${path}`;
+                    }
+                }
+            }
+            return url;
+        }
+
+        async function fetchRuns() {
+            try {
+                const response = await fetch('/api/runs');
+                const data = await response.json();
+                const select = document.getElementById('runSelect');
+                select.innerHTML = '<option value="">Select a run...</option>';
+                data.runs.forEach(run => {
+                    const option = document.createElement('option');
+                    option.value = run.id;
+                    
+                    // Get image count from parameter_blob
+                    let requestedCount = 1;
+                    if (run.parameter_blob && typeof run.parameter_blob === 'object') {
+                        requestedCount = run.parameter_blob.image_count || 1;
+                    } else if (run.parameter_blob && typeof run.parameter_blob === 'string') {
+                        try {
+                            const params = JSON.parse(run.parameter_blob);
+                            requestedCount = params.image_count || 1;
+                        } catch (e) {
+                            requestedCount = 1;
+                        }
+                    }
+                    
+                    // Count actual generated images
+                    const generatedCount = run.images ? run.images.length : 0;
+                    
+                    // Format progress
+                    const progress = `${generatedCount}/${requestedCount}`;
+                    
+                    option.textContent = `${run.id.substring(0, 8)}... - ${run.status} [${progress}] (${run.prompt.substring(0, 40)}...)`;
+                    select.appendChild(option);
+                });
+            } catch (error) {
+                showStatus('Error loading runs: ' + error.message, 'error');
+            }
+        }
+
+        async function loadRun(runId) {
+            if (!runId) {
+                document.getElementById('runInfo').style.display = 'none';
+                return;
+            }
+            currentRunId = runId;
+            selectedImages.clear();
+            document.getElementById('loading').style.display = 'block';
+            try {
+                const response = await fetch(`/api/runs/${runId}`);
+                const run = await response.json();
+                
+                document.getElementById('runId').textContent = `Run ${run.id.substring(0, 8)}...`;
+                document.getElementById('runPrompt').textContent = run.prompt;
+                document.getElementById('runStatus').textContent = run.status;
+                document.getElementById('imageCount').textContent = run.images.length;
+                
+                const gallery = document.getElementById('gallery');
+                gallery.innerHTML = '';
+                imageMap = {};
+                run.images.sort((a, b) => a.ordinal - b.ordinal).forEach(image => {
+                    const httpUrl = convertUrl(image.asset_uri);
+                    imageMap[image.id] = httpUrl;
+                    const card = document.createElement('div');
+                    
+                    // Determine status class and label
+                    let statusClass = '';
+                    let statusLabel = '';
+                    const imageStatus = image.status?.toLowerCase() || '';
+                    
+                    if (imageStatus === 'approved') {
+                        statusClass = 'approved';
+                        statusLabel = 'APPROVED';
+                    } else if (imageStatus === 'rejected') {
+                        statusClass = 'rejected';
+                        statusLabel = 'REJECTED';
+                    } else if (imageStatus === 'posted' || imageStatus === 'POSTED') {
+                        statusClass = 'posted';
+                        statusLabel = 'POSTED';
+                    }
+                    
+                    card.className = `image-card ${statusClass}`;
+                    card.dataset.imageId = image.id;
+                    card.innerHTML = `
+                        <div class="checkbox" onclick="event.stopPropagation(); toggleImage('${image.id}', this.parentElement)"></div>
+                        <img src="${httpUrl}" alt="Image ${image.ordinal}" 
+                             onclick="openLightbox('${image.id}')"
+                             onerror="this.src='data:image/svg+xml,%3Csvg xmlns=\\'http://www.w3.org/2000/svg\\' width=\\'200\\' height=\\'200\\'%3E%3Ctext x=\\'50%25\\' y=\\'50%25\\' text-anchor=\\'middle\\'%3EFailed to load%3C/text%3E%3C/svg%3E'">
+                        ${statusLabel ? `<div class="status-overlay"><div class="status-label">${statusLabel}</div></div>` : ''}
+                        <div class="info">
+                            #${image.ordinal} - ${image.status || 'pending'}
+                        </div>
+                    `;
+                    gallery.appendChild(card);
+                });
+                document.getElementById('runInfo').style.display = 'block';
+            } catch (error) {
+                showStatus('Error loading run: ' + error.message, 'error');
+            } finally {
+                document.getElementById('loading').style.display = 'none';
+            }
+        }
+
+        function toggleImage(imageId, card) {
+            if (selectedImages.has(imageId)) {
+                selectedImages.delete(imageId);
+                card.classList.remove('selected');
+            } else {
+                selectedImages.add(imageId);
+                card.classList.add('selected');
+            }
+        }
+
+        function openLightbox(imageId) {
+            const url = imageMap[imageId];
+            if (url) {
+                document.getElementById('lightboxImage').src = url;
+                document.getElementById('lightbox').classList.add('active');
+            }
+        }
+
+        function closeLightbox() {
+            document.getElementById('lightbox').classList.remove('active');
+        }
+
+        async function approveSelected() {
+            await processSelected('approve');
+        }
+
+        async function rejectSelected() {
+            await processSelected('reject');
+        }
+
+        async function processSelected(action) {
+            if (!currentRunId) {
+                showStatus('Please select a run first', 'error');
+                return;
+            }
+            if (selectedImages.size === 0) {
+                showStatus('Please select at least one image', 'error');
+                return;
+            }
+
+            const imageIds = Array.from(selectedImages);
+            let success = 0;
+            let failed = 0;
+            const endpoint = action === 'approve' ? 'approve' : 'reject';
+
+            for (const imageId of imageIds) {
+                try {
+                    const response = await fetch(`/api/runs/${currentRunId}/images/${imageId}/${endpoint}`, {
+                        method: 'POST'
+                    });
+                    if (response.ok) {
+                        success++;
+                    } else {
+                        failed++;
+                    }
+                } catch (error) {
+                    failed++;
+                }
+            }
+
+            if (failed === 0) {
+                showStatus(`Successfully ${action}d ${success} image(s)`, 'success');
+                selectedImages.clear();
+                document.querySelectorAll('.image-card.selected').forEach(card => {
+                    card.classList.remove('selected');
+                });
+                loadRun(currentRunId); // Reload to show updated status
+            } else {
+                showStatus(`${action.charAt(0).toUpperCase() + action.slice(1)}ed ${success}, failed ${failed}`, 'error');
+            }
+        }
+
+        function refreshRuns() {
+            fetchRuns();
+        }
+
+        function showStatus(message, type) {
+            const status = document.getElementById('status');
+            status.textContent = message;
+            status.className = `status ${type}`;
+            status.style.display = 'block';
+            setTimeout(() => {
+                status.style.display = 'none';
+            }, 5000);
+        }
+
+        // Initialize
+        document.getElementById('runSelect').addEventListener('change', (e) => {
+            loadRun(e.target.value);
+        });
+        fetchRuns();
+    </script>
+</body>
+</html>
+

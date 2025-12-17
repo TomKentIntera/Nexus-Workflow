@@ -80,13 +80,43 @@ def _ensure_loaded() -> tuple[ort.InferenceSession, list[tuple[str, int]]]:
 
 
 def _prepare_image(image_bytes: bytes, size: int = 448) -> np.ndarray:
+    if not image_bytes or len(image_bytes) == 0:
+        raise WD14TaggerError("Image bytes are empty")
+    
     try:
         img = Image.open(BytesIO(image_bytes)).convert("RGB")
     except Exception as exc:
         raise WD14TaggerError(f"Unable to decode image: {exc}") from exc
 
-    # Pad to square (white background) then resize
+    # Verify image is valid
     w, h = img.size
+    if w == 0 or h == 0:
+        raise WD14TaggerError(f"Invalid image dimensions: {w}x{h}")
+    
+    # Check if image is mostly black/empty by sampling
+    sample = np.asarray(img)
+    if sample.size > 0:
+        # Check if image is mostly black (mean < 10) or mostly white (mean > 245)
+        mean_brightness = np.mean(sample)
+        std_brightness = np.std(sample)
+        min_brightness = np.min(sample)
+        max_brightness = np.max(sample)
+        
+        # Log image statistics for debugging (using print with flush for immediate visibility)
+        import sys
+        print(f"[WD14] Image stats - size: {w}x{h}, mean: {mean_brightness:.1f}, std: {std_brightness:.1f}, range: [{min_brightness:.1f}, {max_brightness:.1f}]", file=sys.stderr, flush=True)
+        
+        # Warn if image is very dark but don't fail (might be intentional)
+        if mean_brightness < 20:
+            print(f"[WD14] WARNING: Image is very dark (mean brightness: {mean_brightness:.1f}) - results may be inaccurate", file=sys.stderr, flush=True)
+        if mean_brightness > 235:
+            print(f"[WD14] WARNING: Image is very bright (mean brightness: {mean_brightness:.1f}) - results may be inaccurate", file=sys.stderr, flush=True)
+        
+        # Only fail if image is completely uniform (likely corrupted)
+        if std_brightness < 1.0:
+            raise WD14TaggerError(f"Image appears to be uniform/corrupted (mean: {mean_brightness:.1f}, std: {std_brightness:.1f})")
+
+    # Pad to square (white background) then resize
     side = max(w, h)
     canvas = Image.new("RGB", (side, side), (255, 255, 255))
     canvas.paste(img, ((side - w) // 2, (side - h) // 2))
@@ -96,8 +126,8 @@ def _prepare_image(image_bytes: bytes, size: int = 448) -> np.ndarray:
     mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
     std = np.array([0.229, 0.224, 0.225], dtype=np.float32)
     arr = (arr - mean) / std
-    arr = np.transpose(arr, (2, 0, 1))  # HWC -> CHW
-    arr = np.expand_dims(arr, 0)  # NCHW
+    # Keep HWC format (NHWC after batch dimension is added)
+    arr = np.expand_dims(arr, 0)  # NHWC: [1, height, width, channels]
     return arr
 
 

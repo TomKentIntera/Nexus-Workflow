@@ -21,8 +21,39 @@ services:
       GENERIC_TIMEZONE: "UTC"
       API_BASE_URL: "http://api:8000"
       PYTHON_BIN: "/usr/local/bin/python"
+      # Increase task timeout for long-running operations (e.g., image generation, autotagging)
+      EXECUTIONS_TIMEOUT: "300"
+      EXECUTIONS_TIMEOUT_MAX: "600"
+      # Configure task runners in external mode
+      N8N_RUNNERS_ENABLED: "true"
+      N8N_RUNNERS_MODE: "external"
+      N8N_RUNNERS_BROKER_LISTEN_ADDRESS: "0.0.0.0"
+      N8N_RUNNERS_AUTH_TOKEN: "workflow-runners-secret-token-change-in-production"
+      N8N_NATIVE_PYTHON_RUNNER: "false"
     volumes:
       - n8n_data:/home/node/.n8n
+    networks:
+      - workflow_stack
+
+  n8n-runners:
+    # Version must match n8n version - using latest to match n8nio/n8n:latest
+    # If you pin n8n version, pin this too (e.g., n8nio/runners:2.0.2)
+    image: n8nio/runners:latest
+    restart: unless-stopped
+    depends_on:
+      - n8n
+    ports:
+      # Health check ports for JavaScript and Python runners
+      # Note: Port 5680 is used by the launcher itself
+      - "5682:5682"  # JavaScript runner health check
+      - "5683:5683"  # Python runner health check
+    environment:
+      N8N_RUNNERS_TASK_BROKER_URI: "http://n8n:5679"
+      N8N_RUNNERS_AUTH_TOKEN: "workflow-runners-secret-token-change-in-production"
+      N8N_RUNNERS_AUTO_SHUTDOWN_TIMEOUT: "15"
+    volumes:
+      # Mount custom launcher config to allowlist Python stdlib modules
+      - ./services/n8n/n8n-task-runners.json:/etc/n8n-task-runners.json:ro
     networks:
       - workflow_stack
 
@@ -43,6 +74,24 @@ services:
     depends_on:
       - mysql
 
+  wd14-tagger:
+    # Build from local clone of the repository
+    # First, clone the repo: git clone https://github.com/LlmKira/wd14-tagger-server.git services/wd14-tagger-server
+    # Or run: ./setup-wd14-tagger.ps1 (Windows) or ./setup-wd14-tagger.sh (Linux/Mac)
+    build:
+      context: ./services/wd14-tagger-server
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "5010:5010"
+    environment:
+      # Set the model to use (default: wd-swinv2-tagger-v3)
+      # Options: wd-v1-4-convnext-tagger-v2, wd-swinv2-tagger-v3, wd-v1-4-moat-tagger-v2, etc.
+      # See services/wd14-tagger-server/app/values.py for all available models
+      WD_MODEL_NAME: "wd-v1-4-convnext-tagger-v2"
+    networks:
+      - workflow_stack
+
   reviewer:
     build:
       context: ./services/reviewer
@@ -52,8 +101,15 @@ services:
       - "7860:7860"
     env_file:
       - ./services/reviewer/.env
+    environment:
+      MINIO_ENDPOINT: "minio:9000"
+      MINIO_ACCESS_KEY: "workflow"
+      MINIO_SECRET_KEY: "workflow_secret"
+    volumes:
+      - ./services/reviewer/static:/app/static:ro
     depends_on:
       - api
+      - minio
     networks:
       - workflow_stack
 
@@ -106,8 +162,8 @@ services:
 
   image-generator:
     build:
-      context: ./services/image-generator
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ./services/image-generator/Dockerfile
     restart: unless-stopped
     volumes:
       - image_generator_cache:/app/hf_cache
@@ -116,6 +172,8 @@ services:
       - ./services/image-generator/generator.py:/app/generator.py
       - ./services/image-generator/db.py:/app/db.py
       - ./services/image-generator/worker.py:/app/worker.py
+      # Mount logo file for development
+      - ./patreon_logo.png:/app/patreon_logo.png:ro
     networks:
       - workflow_stack
     environment:
@@ -124,6 +182,7 @@ services:
       MINIO_ACCESS_KEY: "workflow"
       MINIO_SECRET_KEY: "workflow_secret"
       MINIO_BUCKET: "runs"
+      MINIO_PUBLIC_BASE: "http://localhost:9000"
       DB_HOST: "mysql"
       DB_PORT: "3306"
       DB_NAME: "workflow"

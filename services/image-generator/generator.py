@@ -88,7 +88,8 @@ class HeartsyncModel:
         height: int = 1024,
         seed: Optional[int] = None,
         saturation_boost: float = 1.2,
-        contrast_boost: float = 1.1
+        contrast_boost: float = 1.1,
+        watermark_width: int = 300
     ) -> Tuple[Image.Image, int]:
         """Generate a single image based on the prompt."""
         if not self.loaded or self.pipe is None:
@@ -139,6 +140,9 @@ class HeartsyncModel:
             # Enhance colors and contrast
             image = self.enhance_image_colors(image, saturation_boost, contrast_boost)
             
+            # Overlay logo
+            image = self.overlay_logo(image, watermark_width)
+            
             return image, actual_seed
             
         except Exception as e:
@@ -168,6 +172,59 @@ class HeartsyncModel:
         img_array = np.clip(img_array, 0, 255).astype(np.uint8)
         
         return Image.fromarray(img_array)
+    
+    def overlay_logo(self, image: Image.Image, max_width: int = 300) -> Image.Image:
+        """Overlay the Patreon logo on the top left of the image."""
+        # Try multiple possible paths for the logo
+        logo_paths = [
+            "/app/patreon_logo.png",  # Docker container path
+            os.path.join(os.getcwd(), "patreon_logo.png"),  # Current directory
+            os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), "patreon_logo.png"),  # Nexus-Workflow root
+            os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "patreon_logo.png"),  # Alternative path
+        ]
+        
+        logo_path = None
+        for path in logo_paths:
+            if os.path.exists(path):
+                logo_path = path
+                break
+        
+        if not logo_path:
+            print("⚠️  Warning: Logo file not found, skipping overlay")
+            return image
+        
+        try:
+            # Load logo
+            logo = Image.open(logo_path).convert("RGBA")
+            
+            # Calculate logo size (max_width px wide, maintain aspect ratio)
+            logo_width, logo_height = logo.size
+            if logo_width > max_width:
+                ratio = max_width / logo_width
+                new_width = max_width
+                new_height = int(logo_height * ratio)
+                logo = logo.resize((new_width, new_height), Image.Resampling.LANCZOS)
+            
+            # Convert image to RGBA for compositing
+            original_mode = image.mode
+            if image.mode != "RGBA":
+                image = image.convert("RGBA")
+            
+            # Paste logo at top left (with transparency)
+            # The third argument (logo) uses the alpha channel as mask
+            image.paste(logo, (0, 0), logo)
+            
+            # Convert back to RGB (original format for saving)
+            if original_mode == "RGB" or image.mode == "RGBA":
+                background = Image.new("RGB", image.size, (255, 255, 255))
+                background.paste(image, mask=image.split()[3])  # Use alpha channel as mask
+                image = background
+            
+            return image
+            
+        except Exception as e:
+            print(f"⚠️  Warning: Failed to overlay logo: {str(e)}")
+            return image
     
     def save_image_with_metadata(
         self, 
@@ -254,11 +311,12 @@ class HeartsyncModel:
                     content_type="image/png"
                 )
                 
-                # Determine MinIO URI
+                # Determine MinIO URI - always use HTTP URL for browser access
                 if minio_public_base:
-                    minio_uri = f"{minio_public_base.rstrip('/')}/{object_name}"
+                    minio_uri = f"{minio_public_base.rstrip('/')}/{minio_bucket}/{object_name}"
                 else:
-                    minio_uri = f"s3://{minio_bucket}/{object_name}"
+                    # Fallback to localhost if not configured
+                    minio_uri = f"http://localhost:9000/{minio_bucket}/{object_name}"
                 
                 result["minio_uri"] = minio_uri
                 metadata["minio_uri"] = minio_uri
@@ -339,6 +397,7 @@ def generate_images_for_run(
     seed: Optional[int] = None,
     saturation_boost: float = 1.2,
     contrast_boost: float = 1.1,
+    watermark_width: int = 300,
     session: Optional[Session] = None
 ):
     """
@@ -411,7 +470,8 @@ def generate_images_for_run(
                 height=height,
                 seed=current_seed,
                 saturation_boost=saturation_boost,
-                contrast_boost=contrast_boost
+                contrast_boost=contrast_boost,
+                watermark_width=watermark_width
             )
             
             # Save image with metadata and upload to MinIO if configured
@@ -521,6 +581,8 @@ def generate_images(
     generated_paths = []
     results = []
     base_seed = seed if seed is not None else None
+    # Default watermark_width for generate_images (not used in worker path)
+    watermark_width = 300
     
     for i in range(num_images):
         print(f"Generating image {i+1}/{num_images}...")
@@ -539,7 +601,8 @@ def generate_images(
                 height=height,
                 seed=current_seed,
                 saturation_boost=saturation_boost,
-                contrast_boost=contrast_boost
+                contrast_boost=contrast_boost,
+                watermark_width=watermark_width
             )
             
             # Save image with metadata and upload to MinIO if configured

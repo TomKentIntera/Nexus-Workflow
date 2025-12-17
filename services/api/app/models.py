@@ -20,9 +20,10 @@ class RunStatus(str, Enum):
 
 
 class RunImageStatus(str, Enum):
-    GENERATED = "generated"
-    APPROVED = "approved"
-    REJECTED = "rejected"
+    GENERATED = "GENERATED"
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
+    POSTED = "POSTED"
 
 
 class WebhookStatus(str, Enum):
