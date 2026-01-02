@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import List, Sequence
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
@@ -18,7 +18,6 @@ from ..schemas import (
     RunRead,
     RunUpdateStatus,
 )
-from ..services.webhooks import enqueue_run_image_approval_webhook
 
 router = APIRouter(prefix="/runs", tags=["runs"])
 
@@ -127,7 +126,6 @@ def approve_run_image(
     run_id: str,
     image_id: str,
     payload: RunImageApprovalRequest,
-    background_tasks: BackgroundTasks,
     session: Session = Depends(get_session),
 ) -> RunImageApprovalResponse:
     image = _get_run_image(session, run_id, image_id)
@@ -146,12 +144,10 @@ def approve_run_image(
     session.commit()
     session.refresh(approval)
 
-    background_tasks.add_task(enqueue_run_image_approval_webhook, approval.id)
-
     return RunImageApprovalResponse(
         approval_id=approval.id,
         image_id=image.id,
-        webhook_status=approval.webhook_status.value,
+        webhook_status="disabled",
     )
 
 

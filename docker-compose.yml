@@ -32,6 +32,8 @@ services:
       N8N_NATIVE_PYTHON_RUNNER: "false"
     volumes:
       - n8n_data:/home/node/.n8n
+      # Optional: Mount your Cypress project directory to run tests
+      # - ./path/to/cypress-project:/mnt/cypress-project:ro
     networks:
       - workflow_stack
 
@@ -121,6 +123,7 @@ services:
       MYSQL_DATABASE: workflow
       MYSQL_USER: workflow
       MYSQL_PASSWORD: workflow
+    command: --innodb_lock_wait_timeout=120 --max_connections=200
     volumes:
       - mysql_data:/var/lib/mysql
     ports:

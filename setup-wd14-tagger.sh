@@ -11,3 +11,4 @@ fi
 
 echo "You can now start the service with: docker compose up -d wd14-tagger"
 
+

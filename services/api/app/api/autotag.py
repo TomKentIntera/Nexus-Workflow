@@ -52,9 +52,33 @@ class AutotagResponse(BaseModel):
     rating: Dict[str, float] = Field(default_factory=dict, description="Rating scores (general, sensitive, questionable, explicit)")
 
 
-@router.post("", response_model=AutotagResponse)
-def autotag(payload: AutotagRequest) -> AutotagResponse:
+@router.post("/", response_model=AutotagResponse)
+async def autotag(payload: AutotagRequest) -> AutotagResponse:
+    from ..config import get_settings
+    
     object_name = _validate_relative_path(payload.path)
+    
+    # Strip bucket prefix if present (e.g., "runs/path/to/file" -> "path/to/file")
+    # Handle case-insensitive matching and leading slashes
+    settings = get_settings()
+    bucket_name = settings.minio_bucket
+    
+    # Remove leading slashes
+    normalized = object_name.lstrip("/")
+    
+    # Check if path starts with bucket prefix (case-insensitive)
+    bucket_prefix_lower = f"{bucket_name.lower()}/"
+    if normalized.lower().startswith(bucket_prefix_lower):
+        # Strip the bucket prefix, preserving case of the rest
+        object_name = normalized[len(bucket_name) + 1:]
+    elif normalized.lower() == bucket_name.lower():
+        # Path is just the bucket name, which is invalid
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="path must include an object name, not just the bucket name"
+        )
+    else:
+        object_name = normalized
 
     # Fetch image from MinIO
     try:

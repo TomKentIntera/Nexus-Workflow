@@ -10,3 +10,4 @@ if (-not (Test-Path "services\wd14-tagger-server")) {
 
 Write-Host "You can now start the service with: docker compose up -d wd14-tagger"
 
+

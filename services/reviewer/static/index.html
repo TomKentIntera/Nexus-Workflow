@@ -45,6 +45,7 @@
         button.reject { background: #dc3545; }
         button.reject:hover { background: #c82333; }
         button:disabled { background: #ccc; cursor: not-allowed; }
+        button:hover { opacity: 0.9; }
         .run-info {
             background: #f8f9fa;
             padding: 16px;
@@ -192,6 +193,7 @@
                 <option value="">Loading runs...</option>
             </select>
             <button onclick="refreshRuns()">Refresh</button>
+            <button onclick="selectAllPending()" style="background: #17a2b8;">Select All Pending</button>
             <button class="approve" onclick="approveSelected()">Approve Selected</button>
             <button class="reject" onclick="rejectSelected()">Reject Selected</button>
         </div>
@@ -281,7 +283,20 @@
                     // Format progress
                     const progress = `${generatedCount}/${requestedCount}`;
                     
-                    option.textContent = `${run.id.substring(0, 8)}... - ${run.status} [${progress}] (${run.prompt.substring(0, 40)}...)`;
+                    // Format date
+                    let dateStr = '';
+                    if (run.created_at) {
+                        const date = new Date(run.created_at);
+                        dateStr = date.toLocaleDateString('en-US', { 
+                            month: 'short', 
+                            day: 'numeric', 
+                            year: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit'
+                        });
+                    }
+                    
+                    option.textContent = `${dateStr} - ${run.id.substring(0, 8)}... - ${run.status} [${progress}] (${run.prompt.substring(0, 40)}...)`;
                     select.appendChild(option);
                 });
             } catch (error) {
@@ -360,6 +375,22 @@
                 selectedImages.add(imageId);
                 card.classList.add('selected');
             }
+        }
+
+        function selectAllPending() {
+            // Select all images that haven't been approved/rejected/posted (status GENERATED)
+            document.querySelectorAll('.image-card').forEach(card => {
+                // Check if the card doesn't have approved, rejected, or posted class
+                if (!card.classList.contains('approved') && 
+                    !card.classList.contains('rejected') && 
+                    !card.classList.contains('posted')) {
+                    const imageId = card.dataset.imageId;
+                    if (imageId && !selectedImages.has(imageId)) {
+                        selectedImages.add(imageId);
+                        card.classList.add('selected');
+                    }
+                }
+            });
         }
 
         function openLightbox(imageId) {

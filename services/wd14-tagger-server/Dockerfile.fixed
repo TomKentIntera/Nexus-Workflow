@@ -20,3 +20,4 @@ EXPOSE 5010
 
 CMD ["pdm", "run", "python", "main.py"]
 
+
