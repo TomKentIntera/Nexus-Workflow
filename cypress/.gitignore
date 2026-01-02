@@ -1,0 +1,13 @@
+# Cypress
+cypress/videos/
+cypress/screenshots/
+cypress/downloads/
+cypress/fixtures/downloads/
+
+# Environment files
+cypress.env.json
+
+# Logs
+*.log
+node_modules/*
+node_modules/

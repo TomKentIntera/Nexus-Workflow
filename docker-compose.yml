@@ -32,8 +32,9 @@ services:
       N8N_NATIVE_PYTHON_RUNNER: "false"
     volumes:
       - n8n_data:/home/node/.n8n
-      # Optional: Mount your Cypress project directory to run tests
-      # - ./path/to/cypress-project:/mnt/cypress-project:ro
+      # Mount Cypress project directory to run tests from n8n
+      - ./cypress:/mnt/cypress:ro
+      - .:/mnt/nexus-workflow:ro
     networks:
       - workflow_stack
 
