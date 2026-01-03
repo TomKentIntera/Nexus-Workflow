@@ -80,6 +80,8 @@ class LinkSubmissionRead(BaseModel):
     source_url: Optional[str] = None
     created_at: datetime
     webhook_status: str
+    webhook_attempts: int
+    webhook_last_error: Optional[str] = None
 
 
 class LinkSubmissionList(BaseModel):

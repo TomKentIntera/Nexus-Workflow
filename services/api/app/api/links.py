@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Sequence
 
 import httpx
-from fastapi import APIRouter, BackgroundTasks, Depends, Request, status
+from fastapi import APIRouter, Depends, Request, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -15,23 +15,20 @@ from ..schemas import LinkSubmissionCreate, LinkSubmissionList, LinkSubmissionRe
 router = APIRouter(prefix="/links", tags=["links"])
 
 
-def _post_link_submission_webhook(submission_id: str) -> None:
+def _deliver_link_submission_webhook(submission_id: str) -> None:
     settings = get_settings()
     webhook_url = settings.n8n_link_submission_webhook
-    if not webhook_url:
-        # Webhook disabled; mark as sent to avoid a permanent pending state.
-        with SessionLocal() as session:
-            submission = session.get(LinkSubmission, submission_id)
-            if submission:
-                submission.webhook_status = WebhookStatus.SENT
-                submission.webhook_attempts = (submission.webhook_attempts or 0) + 1
-                session.add(submission)
-                session.commit()
-        return
 
     with SessionLocal() as session:
         submission = session.get(LinkSubmission, submission_id)
         if not submission:
+            return
+        if not webhook_url:
+            submission.webhook_status = WebhookStatus.FAILED
+            submission.webhook_attempts = (submission.webhook_attempts or 0) + 1
+            submission.webhook_last_error = "WF_N8N_LINK_SUBMISSION_WEBHOOK is not configured"
+            session.add(submission)
+            session.commit()
             return
 
         payload = {
@@ -74,7 +71,6 @@ def _post_link_submission_webhook(submission_id: str) -> None:
 def create_link_submission(
     payload: LinkSubmissionCreate,
     request: Request,
-    background: BackgroundTasks,
     session: Session = Depends(get_session),
 ) -> LinkSubmission:
     submission = LinkSubmission(
@@ -87,7 +83,8 @@ def create_link_submission(
     session.commit()
     session.refresh(submission)
 
-    background.add_task(_post_link_submission_webhook, submission.id)
+    _deliver_link_submission_webhook(submission.id)
+    session.refresh(submission)
     return submission
 
 
