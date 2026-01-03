@@ -17,6 +17,7 @@ Orchestrates an image-generation workflow built on n8n, FastAPI, MySQL, and MinI
    - FastAPI docs: http://localhost:8000/docs
    - n8n: http://localhost:5678/
    - Reviewer UI: http://localhost:7860/
+   - Link Submitter (mobile): http://localhost:3001/
    - MinIO console: http://localhost:9001/
 
 ## Workflow Overview

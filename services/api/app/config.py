@@ -15,6 +15,8 @@ class Settings(BaseSettings):
     minio_bucket: str = "runs"
     minio_access_key: Optional[str] = None
     minio_secret_key: Optional[str] = None
+    cors_allow_origins: str = "*"
+    n8n_link_submission_webhook: Optional[HttpUrl] = None
 
     # WD1.4 (SmilingWolf wd-v1-4-convnext-tagger) autotagging settings
     wd14_repo_id: str = "SmilingWolf/wd-v1-4-convnext-tagger"

@@ -116,6 +116,18 @@ services:
     networks:
       - workflow_stack
 
+  link-submitter:
+    build:
+      context: ./services/link-submitter
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "3001:80"
+    depends_on:
+      - api
+    networks:
+      - workflow_stack
+
   mysql:
     image: mysql:8.0
     restart: unless-stopped

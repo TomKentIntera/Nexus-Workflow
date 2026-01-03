@@ -11,6 +11,38 @@ The API service is on the same Docker network (`workflow_stack`), so you can use
 
 ## Available Endpoints
 
+### Link Submissions (Mobile Link Submitter)
+
+This is the “phone → submit a URL → n8n workflow continues processing” path.
+
+**Endpoint:** `POST http://api:8000/links`
+
+**Request Body:**
+```json
+{
+  "url": "https://example.com/some/page",
+  "source_url": "https://optional-source.example.com/"
+}
+```
+
+**Response (always 201; webhook delivery is recorded):**
+```json
+{
+  "id": "submission-uuid",
+  "url": "https://example.com/some/page",
+  "source_url": "https://optional-source.example.com/",
+  "created_at": "2026-01-03T00:00:00",
+  "webhook_status": "sent",
+  "webhook_attempts": 1,
+  "webhook_last_error": null
+}
+```
+
+**Required env var (API → n8n):**
+- `WF_N8N_LINK_SUBMISSION_WEBHOOK=http://n8n:5678/webhook/link-submission`
+
+In n8n, create a workflow that starts with a **Webhook** node (POST) and use the resulting webhook URL for `WF_N8N_LINK_SUBMISSION_WEBHOOK`.
+
 ### 1. Create a Run (Queue Image Generation)
 **Endpoint:** `POST http://api:8000/runs`
 
