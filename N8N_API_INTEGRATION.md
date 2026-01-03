@@ -100,6 +100,10 @@ In n8n, create a workflow that starts with a **Webhook** node (POST) and use the
 ### 2. List Runs
 **Endpoint:** `GET http://api:8000/runs`
 
+**Default Behavior:**
+- If `status` is not provided, the API returns only `generating` and `ready` runs (to avoid returning large queued backlogs).
+- The response includes `queued_count` so UIs can show how many runs are currently queued without fetching them all.
+
 **Query Parameters:**
 - `status` (optional) - Filter by status: `queued`, `generating`, `ready`, `approved`, `error`
 
@@ -108,6 +112,7 @@ In n8n, create a workflow that starts with a **Webhook** node (POST) and use the
 **Response:**
 ```json
 {
+  "queued_count": 123,
   "runs": [
     {
       "id": "run-uuid",

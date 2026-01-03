@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import List, Sequence
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from ..database import get_session
@@ -71,13 +71,19 @@ def list_runs(
     status_filter: RunStatus | None = Query(default=None, alias="status"),
     session: Session = Depends(get_session),
 ) -> RunList:
+    queued_count_stmt = select(func.count()).select_from(Run).where(Run.status == RunStatus.QUEUED)
+    queued_count = session.execute(queued_count_stmt).scalar_one()
+
     stmt = select(Run).options(selectinload(Run.images)).order_by(Run.created_at.desc())
     if status_filter:
         stmt = stmt.where(Run.status == status_filter)
+    else:
+        # Default behavior: only return runs that are actively generating or have generated images.
+        stmt = stmt.where(Run.status.in_([RunStatus.GENERATING, RunStatus.READY]))
     # Exclude runs with POSTED status
     stmt = stmt.where(Run.status != RunStatus.POSTED)
     runs: Sequence[Run] = session.execute(stmt).unique().scalars().all()
-    return RunList(runs=runs)
+    return RunList(runs=runs, queued_count=queued_count)
 
 
 @router.get("/{run_id}", response_model=RunRead)
