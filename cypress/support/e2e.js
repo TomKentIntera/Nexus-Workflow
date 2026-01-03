@@ -33,3 +33,4 @@ Cypress.on('uncaught:exception', (err, runnable) => {
 // Increase timeout for long-running operations
 Cypress.config('defaultCommandTimeout', 10000);
 
+

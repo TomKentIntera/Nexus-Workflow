@@ -74,6 +74,8 @@ def list_runs(
     stmt = select(Run).options(selectinload(Run.images)).order_by(Run.created_at.desc())
     if status_filter:
         stmt = stmt.where(Run.status == status_filter)
+    # Exclude runs with POSTED status
+    stmt = stmt.where(Run.status != RunStatus.POSTED)
     runs: Sequence[Run] = session.execute(stmt).unique().scalars().all()
     return RunList(runs=runs)
 

@@ -17,6 +17,7 @@ class RunStatus(str, Enum):
     READY = "ready"
     APPROVED = "approved"
     ERROR = "error"
+    POSTED = "posted"
 
 
 class RunImageStatus(str, Enum):
