@@ -94,3 +94,22 @@ class RunImageApproval(Base):
     webhook_last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     run_image: Mapped[RunImage] = relationship("RunImage", back_populates="approvals")
+
+
+class LinkSubmission(Base):
+    __tablename__ = "link_submissions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    url: Mapped[str] = mapped_column(Text, nullable=False)
+    source_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    client_ip: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    user_agent: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+
+    webhook_status: Mapped[WebhookStatus] = mapped_column(
+        SqlEnum(WebhookStatus, name="link_webhook_status"),
+        default=WebhookStatus.PENDING,
+        nullable=False,
+    )
+    webhook_attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    webhook_last_error: Mapped[str | None] = mapped_column(Text, nullable=True)

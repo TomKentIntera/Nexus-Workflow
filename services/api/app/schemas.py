@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field
 
 from .models import RunImageStatus, RunStatus
 
@@ -65,3 +65,22 @@ class RunImageApprovalResponse(BaseModel):
     approval_id: str
     image_id: str
     webhook_status: str
+
+
+class LinkSubmissionCreate(BaseModel):
+    url: AnyHttpUrl
+    source_url: Optional[AnyHttpUrl] = None
+
+
+class LinkSubmissionRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    url: str
+    source_url: Optional[str] = None
+    created_at: datetime
+    webhook_status: str
+
+
+class LinkSubmissionList(BaseModel):
+    submissions: List[LinkSubmissionRead]
