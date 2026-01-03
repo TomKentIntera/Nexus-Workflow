@@ -54,6 +54,7 @@ class RunRead(RunBase):
 
 class RunList(BaseModel):
     runs: List[RunRead]
+    queued_count: int = 0
 
 
 class RunImageApprovalRequest(BaseModel):

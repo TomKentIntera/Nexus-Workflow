@@ -193,6 +193,7 @@
                 <option value="">Loading runs...</option>
             </select>
             <button onclick="refreshRuns()">Refresh</button>
+            <span id="queuedCount" style="align-self: center; color: #666;"></span>
             <button onclick="selectAllPending()" style="background: #17a2b8;">Select All Pending</button>
             <button class="approve" onclick="approveSelected()">Approve Selected</button>
             <button class="reject" onclick="rejectSelected()">Reject Selected</button>
@@ -260,6 +261,11 @@
                 const data = await response.json();
                 const select = document.getElementById('runSelect');
                 select.innerHTML = '<option value="">Select a run...</option>';
+                const queuedEl = document.getElementById('queuedCount');
+                if (queuedEl) {
+                    queuedEl.textContent =
+                        typeof data.queued_count === 'number' ? `Queued: ${data.queued_count}` : '';
+                }
                 data.runs.forEach(run => {
                     const option = document.createElement('option');
                     option.value = run.id;
