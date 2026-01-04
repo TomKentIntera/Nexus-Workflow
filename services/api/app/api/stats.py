@@ -68,6 +68,13 @@ def reviewer_summary(session: Session = Depends(get_session)) -> dict[str, int]:
     )
     approved_images = int(session.execute(approved_images_stmt).scalar_one() or 0)
 
+    posted_images_stmt = (
+        select(func.count())
+        .select_from(RunImage)
+        .where(RunImage.status == RunImageStatus.POSTED)
+    )
+    posted_images = int(session.execute(posted_images_stmt).scalar_one() or 0)
+
     runs_need_review_stmt = (
         select(func.count(func.distinct(RunImage.run_id)))
         .select_from(RunImage)
@@ -85,6 +92,7 @@ def reviewer_summary(session: Session = Depends(get_session)) -> dict[str, int]:
 
     return {
         "approved_images": approved_images,
+        "posted_images": posted_images,
         "runs_need_review": runs_need_review,
         "images_generated_last_hour": images_generated_last_hour,
     }

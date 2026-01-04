@@ -276,9 +276,14 @@
         <div id="pageHome" class="page">
             <div class="cards">
                 <div class="card">
-                    <div class="label">Approved posts</div>
+                    <div class="label">Approved images</div>
                     <div class="value" id="homeApproved">—</div>
                     <div class="hint">Images with status APPROVED (awaiting posting)</div>
+                </div>
+                <div class="card">
+                    <div class="label">Posted images</div>
+                    <div class="value" id="homePosted">—</div>
+                    <div class="hint">Images with status POSTED</div>
                 </div>
                 <div class="card">
                     <div class="label">Runs needing review</div>
@@ -401,6 +406,7 @@
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const s = await res.json();
                 document.getElementById('homeApproved').textContent = (s.approved_images ?? 0).toString();
+                document.getElementById('homePosted').textContent = (s.posted_images ?? 0).toString();
                 document.getElementById('homeNeedReview').textContent = (s.runs_need_review ?? 0).toString();
                 document.getElementById('homeLastHour').textContent = (s.images_generated_last_hour ?? 0).toString();
             } catch (e) {

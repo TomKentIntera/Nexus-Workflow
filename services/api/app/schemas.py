@@ -114,6 +114,7 @@ class ImagesPerHourStats(BaseModel):
 
 class ReviewerSummary(BaseModel):
     approved_images: int = 0
+    posted_images: int = 0
     runs_need_review: int = 0
     images_generated_last_hour: int = 0
 
