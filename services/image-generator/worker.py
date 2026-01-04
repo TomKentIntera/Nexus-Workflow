@@ -68,7 +68,11 @@ def _machine_id() -> str:
 
 def _lease_next_run(api_base: str) -> Optional[dict[str, Any]]:
     try:
-        resp = requests.post(f"{api_base}/runs/lease", timeout=10)
+        resp = requests.post(
+            f"{api_base}/runs/lease",
+            headers={"X-Machine-Id": _machine_id()},
+            timeout=10,
+        )
     except Exception as exc:
         print(f"⚠️  Warning: Failed to reach API ({api_base}): {exc}")
         return None
