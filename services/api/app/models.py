@@ -118,3 +118,14 @@ class LinkSubmission(Base):
     )
     webhook_attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     webhook_last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class BannedTag(Base):
+    __tablename__ = "banned_tags"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    tag: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow
+    )

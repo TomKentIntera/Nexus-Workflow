@@ -230,6 +230,57 @@ async def reject_image(run_id: str, image_id: str) -> Dict:
         raise HTTPException(status_code=502, detail=f"Failed to reject image: {exc}")
 
 
+@app.get("/api/banned-tags", tags=["api"])
+async def list_banned_tags() -> List[str]:
+    """Proxy banned-tags list from API service."""
+    try:
+        async with _api_client() as client:
+            response = await client.get("/banned-tags")
+            response.raise_for_status()
+            return response.json()
+    except httpx.ConnectError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Cannot connect to API service at {settings.api_base_url}. Is the API service running?",
+        )
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to fetch banned tags: {exc}")
+
+
+@app.post("/api/banned-tags", tags=["api"])
+async def add_banned_tags(payload: Dict) -> List[str]:
+    """Proxy add-banned-tags to API service."""
+    try:
+        async with _api_client() as client:
+            response = await client.post("/banned-tags", json=payload)
+            response.raise_for_status()
+            return response.json()
+    except httpx.ConnectError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Cannot connect to API service at {settings.api_base_url}. Is the API service running?",
+        )
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to add banned tags: {exc}")
+
+
+@app.delete("/api/banned-tags/{tag}", tags=["api"])
+async def delete_banned_tag(tag: str) -> List[str]:
+    """Proxy delete-banned-tag to API service."""
+    try:
+        async with _api_client() as client:
+            response = await client.delete(f"/banned-tags/{tag}")
+            response.raise_for_status()
+            return response.json()
+    except httpx.ConnectError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Cannot connect to API service at {settings.api_base_url}. Is the API service running?",
+        )
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to delete banned tag: {exc}")
+
+
 @app.get("/", response_class=HTMLResponse)
 async def index():
     """Serve the reviewer UI."""

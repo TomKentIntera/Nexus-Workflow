@@ -103,6 +103,8 @@
         button.approve:hover { background: #218838; }
         button.reject { background: #dc3545; }
         button.reject:hover { background: #c82333; }
+        button.danger { background: #dc3545; }
+        button.danger:hover { background: #c82333; }
         button:disabled { background: #ccc; cursor: not-allowed; }
         button:hover { opacity: 0.9; }
         .run-info {
@@ -259,6 +261,15 @@
             padding: 12px;
             margin-top: 12px;
         }
+        .inline-actions {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            align-items: center;
+            margin: 12px 0 14px;
+        }
+        .inline-actions button { background: #0d6efd; }
+        .inline-actions button.danger { background: #dc3545; }
     </style>
 </head>
 <body>
@@ -271,6 +282,7 @@
             <button id="navReview" onclick="navigate('review')">Review</button>
             <button id="navPosted" onclick="navigate('posted')">Posted</button>
             <button id="navStats" onclick="navigate('stats')">Stats</button>
+            <button id="navBanned" onclick="navigate('banned')">Banned Tags</button>
         </div>
 
         <div id="pageHome" class="page">
@@ -358,6 +370,24 @@
             </div>
         </div>
 
+        <div id="pageBanned" class="page">
+            <div class="stats">
+                <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
+                    <div style="font-weight:600;">Banned tags</div>
+                    <button onclick="loadBannedTags()">Refresh</button>
+                    <span class="muted" id="bannedCount"></span>
+                </div>
+                <div class="inline-actions">
+                    <input id="bannedTagInput" placeholder="e.g. English text" />
+                    <button onclick="addBannedTag()">Add banned tag</button>
+                </div>
+                <div id="bannedTagsTableWrap"></div>
+                <div class="muted" style="margin-top:10px;">
+                    Note: adding a banned tag will automatically delete any queued runs that contain it.
+                </div>
+            </div>
+        </div>
+
         <div id="status" class="status"></div>
         <div id="loading" class="loading" style="display: none;">Loading...</div>
     </div>
@@ -376,7 +406,7 @@
         }
 
         function setActivePage(page) {
-            const pages = ['home', 'review', 'posted', 'stats'];
+            const pages = ['home', 'review', 'posted', 'stats', 'banned'];
             pages.forEach(p => {
                 document.getElementById(`page${p.charAt(0).toUpperCase() + p.slice(1)}`).classList.toggle('active', p === page);
                 document.getElementById(`nav${p.charAt(0).toUpperCase() + p.slice(1)}`).classList.toggle('active', p === page);
@@ -388,12 +418,13 @@
             }
             if (page === 'posted') refreshPosted();
             if (page === 'stats') loadLastHourStats();
+            if (page === 'banned') loadBannedTags();
         }
 
         function onRoute() {
             const hash = (location.hash || '#/home').replace(/^#\/?/, '');
             const page = (hash.split('/')[0] || 'home').trim();
-            if (!['home', 'review', 'posted', 'stats'].includes(page)) {
+            if (!['home', 'review', 'posted', 'stats', 'banned'].includes(page)) {
                 setActivePage('home');
             } else {
                 setActivePage(page);
@@ -508,6 +539,88 @@
                 ctx.fillText(label, 0, 0);
                 ctx.restore();
             });
+        }
+
+        async function loadBannedTags() {
+            const wrap = document.getElementById('bannedTagsTableWrap');
+            const countEl = document.getElementById('bannedCount');
+            wrap.innerHTML = 'Loading...';
+            countEl.textContent = '';
+            try {
+                const res = await fetch('/api/banned-tags');
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const tags = await res.json();
+                const rows = (Array.isArray(tags) ? tags : []).map(t => String(t)).sort((a, b) => a.localeCompare(b));
+                countEl.textContent = `Count: ${rows.length}`;
+
+                if (!rows.length) {
+                    wrap.innerHTML = '<div style="margin-top:12px; color:#666;">No banned tags yet.</div>';
+                    return;
+                }
+
+                let html = '<table><thead><tr><th>Tag</th><th style="width:140px;">Action</th></tr></thead><tbody>';
+                rows.forEach(tag => {
+                    html += `<tr>
+                        <td>${escapeHtml(tag)}</td>
+                        <td>
+                            <button class="danger" data-tag="${escapeHtml(tag)}">Remove</button>
+                        </td>
+                    </tr>`;
+                });
+                html += '</tbody></table>';
+                wrap.innerHTML = html;
+
+                // Attach click handlers without relying on inline JS escaping.
+                wrap.querySelectorAll('button[data-tag]').forEach(btn => {
+                    btn.addEventListener('click', () => removeBannedTag(btn.getAttribute('data-tag')));
+                });
+            } catch (e) {
+                wrap.innerHTML = `<div style="margin-top:12px; color:#b02a37;">Error loading banned tags: ${e.message}</div>`;
+            }
+        }
+
+        async function addBannedTag() {
+            const input = document.getElementById('bannedTagInput');
+            const tag = (input.value || '').trim();
+            if (!tag) {
+                showStatus('Please enter a tag to ban', 'error');
+                return;
+            }
+            try {
+                const res = await fetch('/api/banned-tags', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ tags: [tag] })
+                });
+                if (!res.ok) {
+                    const text = await res.text();
+                    throw new Error(text || `HTTP ${res.status}`);
+                }
+                input.value = '';
+                showStatus(`Banned tag added: ${tag}`, 'success');
+                loadBannedTags();
+                // Also refresh runs list, since queued runs may have been purged.
+                fetchRuns();
+            } catch (e) {
+                showStatus('Error adding banned tag: ' + e.message, 'error');
+            }
+        }
+
+        async function removeBannedTag(tag) {
+            // tag comes from data-tag, so it is already HTML-decoded by the browser
+            const t = (tag || '').trim();
+            if (!t) return;
+            try {
+                const res = await fetch(`/api/banned-tags/${encodeURIComponent(t)}`, { method: 'DELETE' });
+                if (!res.ok) {
+                    const text = await res.text();
+                    throw new Error(text || `HTTP ${res.status}`);
+                }
+                showStatus(`Removed banned tag: ${t}`, 'success');
+                loadBannedTags();
+            } catch (e) {
+                showStatus('Error removing banned tag: ' + e.message, 'error');
+            }
         }
 
         function escapeHtml(str) {
@@ -850,6 +963,9 @@
         // Initialize
         document.getElementById('runSelect').addEventListener('change', (e) => {
             loadRun(e.target.value);
+        });
+        document.getElementById('bannedTagInput').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') addBannedTag();
         });
         window.addEventListener('hashchange', onRoute);
         onRoute();
