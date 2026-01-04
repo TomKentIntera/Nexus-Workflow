@@ -63,6 +63,9 @@ class RunImage(Base):
     asset_uri: Mapped[str] = mapped_column(Text, nullable=False)
     thumb_uri: Mapped[str | None] = mapped_column(Text, nullable=True)
     generated_by_machine_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # When an image is approved for posting, the API assigns a scheduled time so approvals
+    # can be spread out over time (e.g., last scheduled + 30 minutes).
+    scheduled_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     status: Mapped[RunImageStatus] = mapped_column(
         SqlEnum(RunImageStatus, name="run_image_status"),
         default=RunImageStatus.GENERATED,
