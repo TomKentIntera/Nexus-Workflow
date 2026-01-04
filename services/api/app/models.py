@@ -43,6 +43,7 @@ class Run(Base):
     status: Mapped[RunStatus] = mapped_column(
         SqlEnum(RunStatus, name="run_status"), default=RunStatus.QUEUED, nullable=False
     )
+    leased_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow
@@ -61,6 +62,7 @@ class RunImage(Base):
     ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
     asset_uri: Mapped[str] = mapped_column(Text, nullable=False)
     thumb_uri: Mapped[str | None] = mapped_column(Text, nullable=True)
+    generated_by_machine_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     status: Mapped[RunImageStatus] = mapped_column(
         SqlEnum(RunImageStatus, name="run_image_status"),
         default=RunImageStatus.GENERATED,

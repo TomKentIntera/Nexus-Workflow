@@ -26,6 +26,40 @@
             margin-bottom: 24px;
             flex-wrap: wrap;
         }
+        .tabs {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 16px;
+        }
+        .tab {
+            background: #6c757d;
+        }
+        .tab.active {
+            background: #007bff;
+        }
+        .stats {
+            display: none;
+            background: #f8f9fa;
+            padding: 16px;
+            border-radius: 4px;
+            margin-bottom: 24px;
+        }
+        .stats table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 12px;
+            background: white;
+        }
+        .stats th, .stats td {
+            border: 1px solid #e5e5e5;
+            padding: 8px;
+            font-size: 12px;
+            text-align: left;
+            white-space: nowrap;
+        }
+        .stats th {
+            background: #f1f3f5;
+        }
         select, input, button {
             padding: 10px 16px;
             border: 1px solid #ddd;
@@ -188,6 +222,10 @@
 <body>
     <div class="container">
         <h1>Image Reviewer</h1>
+        <div class="tabs">
+            <button class="tab active" id="tabRuns" onclick="showView('runs')">Runs</button>
+            <button class="tab" id="tabStats" onclick="showView('stats')">Stats</button>
+        </div>
         <div class="controls">
             <select id="runSelect">
                 <option value="">Loading runs...</option>
@@ -197,6 +235,16 @@
             <button onclick="selectAllPending()" style="background: #17a2b8;">Select All Pending</button>
             <button class="approve" onclick="approveSelected()">Approve Selected</button>
             <button class="reject" onclick="rejectSelected()">Reject Selected</button>
+        </div>
+        <div class="stats" id="statsPanel">
+            <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
+                <div style="font-weight:600;">Images generated per hour (UTC)</div>
+                <label>Hours:
+                    <input id="statsHours" type="number" min="1" max="168" value="24" style="width:90px;">
+                </label>
+                <button onclick="loadStats()">Refresh Stats</button>
+            </div>
+            <div id="statsTableWrap"></div>
         </div>
         <div id="runInfo" style="display: none;">
             <div class="run-info">
@@ -218,6 +266,63 @@
         let selectedImages = new Set();
         let currentRunId = null;
         let imageMap = {};
+
+        function showView(view) {
+            const isStats = view === 'stats';
+            document.getElementById('tabRuns').classList.toggle('active', !isStats);
+            document.getElementById('tabStats').classList.toggle('active', isStats);
+            document.querySelector('.controls').style.display = isStats ? 'none' : 'flex';
+            document.getElementById('statsPanel').style.display = isStats ? 'block' : 'none';
+            document.getElementById('runInfo').style.display = isStats ? 'none' : (currentRunId ? 'block' : 'none');
+            if (isStats) {
+                loadStats();
+            }
+        }
+
+        async function loadStats() {
+            const hours = parseInt(document.getElementById('statsHours').value || '24', 10);
+            const wrap = document.getElementById('statsTableWrap');
+            wrap.innerHTML = 'Loading stats...';
+            try {
+                const response = await fetch(`/api/stats/images-per-hour?hours=${encodeURIComponent(hours)}`);
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const payload = await response.json();
+                const hoursList = payload.hours || [];
+                const machines = payload.machines || [];
+                const data = payload.data || [];
+
+                // hour -> machine -> count
+                const lookup = {};
+                data.forEach(row => {
+                    const h = row.hour;
+                    const m = row.machine_id || 'unknown';
+                    const c = row.count || 0;
+                    if (!lookup[h]) lookup[h] = {};
+                    lookup[h][m] = c;
+                });
+
+                if (hoursList.length === 0 || machines.length === 0) {
+                    wrap.innerHTML = '<div style="margin-top:12px; color:#666;">No data in range.</div>';
+                    return;
+                }
+
+                let html = '<table><thead><tr><th>Hour</th>';
+                machines.forEach(m => { html += `<th>${m}</th>`; });
+                html += '</tr></thead><tbody>';
+                hoursList.forEach(h => {
+                    html += `<tr><td>${h}</td>`;
+                    machines.forEach(m => {
+                        const c = (lookup[h] && lookup[h][m]) ? lookup[h][m] : 0;
+                        html += `<td>${c}</td>`;
+                    });
+                    html += '</tr>';
+                });
+                html += '</tbody></table>';
+                wrap.innerHTML = html;
+            } catch (error) {
+                wrap.innerHTML = `<div style="margin-top:12px; color:#b02a37;">Error loading stats: ${error.message}</div>`;
+            }
+        }
 
         function convertUrl(url) {
             if (url.startsWith('s3://')) {
@@ -484,6 +589,7 @@
             loadRun(e.target.value);
         });
         fetchRuns();
+        showView('runs');
     </script>
 </body>
 </html>
