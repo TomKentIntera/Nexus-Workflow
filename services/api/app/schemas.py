@@ -47,6 +47,7 @@ class RunRead(RunBase):
 
     id: str
     status: RunStatus
+    leased_until: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
     images: List[RunImageRead] = []
@@ -67,6 +68,17 @@ class RunImageApprovalResponse(BaseModel):
     approval_id: str
     image_id: str
     webhook_status: str
+
+
+class RunLeaseResponse(BaseModel):
+    """Response returned to an image-generator when leasing a run."""
+
+    id: str
+    workflow_id: Optional[str] = None
+    prompt: str
+    parameter_blob: Optional[Any] = Field(default=None, description="Opaque workflow payload")
+    image_count: int = Field(default=1, ge=1, description="Number of images to generate")
+    leased_until: Optional[datetime] = None
 
 
 class LinkSubmissionCreate(BaseModel):

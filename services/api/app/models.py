@@ -43,6 +43,7 @@ class Run(Base):
     status: Mapped[RunStatus] = mapped_column(
         SqlEnum(RunStatus, name="run_status"), default=RunStatus.QUEUED, nullable=False
     )
+    leased_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow

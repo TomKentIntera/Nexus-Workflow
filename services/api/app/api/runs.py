@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
-from typing import List, Sequence
+import os
+import time
+from typing import Any, List, Sequence
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func, select
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile, status
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session, selectinload
 
 from ..database import get_session
@@ -14,10 +16,14 @@ from ..schemas import (
     RunImageApprovalRequest,
     RunImageApprovalResponse,
     RunImageCreate,
+    RunImageRead,
     RunList,
+    RunLeaseResponse,
     RunRead,
     RunUpdateStatus,
 )
+from ..clients.minio_client import MinioConfigError, MinioPutError, put_object_bytes
+from ..config import get_settings
 
 router = APIRouter(prefix="/runs", tags=["runs"])
 
@@ -39,6 +45,19 @@ def _get_run_image(session: Session, run_id: str, image_id: str) -> RunImage:
     if not result:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run image not found")
     return result
+
+
+def _extract_image_count(parameter_blob: Any | None) -> int:
+    """Best-effort extraction of requested image count from the run's parameter_blob."""
+    try:
+        if isinstance(parameter_blob, dict):
+            val = parameter_blob.get("image_count", 1)
+        else:
+            val = 1
+        count = int(val) if val is not None else 1
+        return max(count, 1)
+    except Exception:
+        return 1
 
 
 @router.post("", response_model=RunRead, status_code=status.HTTP_201_CREATED)
@@ -64,6 +83,50 @@ def create_run(payload: RunCreate, session: Session = Depends(get_session)) -> R
     session.commit()
     session.refresh(run)
     return run
+
+
+@router.post("/lease", response_model=RunLeaseResponse)
+def lease_next_run(session: Session = Depends(get_session)) -> RunLeaseResponse:
+    """
+    Lease the next available run for image generation.
+
+    - Only considers runs with `status=queued` and `leased_until IS NULL`
+    - Sets `leased_until = now + 2 hours`
+    - Also transitions status to `generating` (so UIs reflect progress)
+    """
+    now = datetime.utcnow()
+    lease_until = now + timedelta(hours=2)
+
+    # Atomically claim a single queued run.
+    base_stmt = (
+        select(Run)
+        .where(Run.status == RunStatus.QUEUED, Run.leased_until.is_(None))
+        .order_by(Run.created_at.asc())
+        .limit(1)
+    )
+    # Prefer SKIP LOCKED when supported (MySQL 8+), fall back gracefully otherwise.
+    try:
+        run = session.execute(base_stmt.with_for_update(skip_locked=True)).scalars().first()
+    except Exception:
+        run = session.execute(base_stmt.with_for_update()).scalars().first()
+    if not run:
+        return Response(status_code=status.HTTP_204_NO_CONTENT)  # type: ignore[return-value]
+
+    run.leased_until = lease_until
+    run.status = RunStatus.GENERATING
+    run.updated_at = now
+    session.add(run)
+    session.commit()
+    session.refresh(run)
+
+    return RunLeaseResponse(
+        id=run.id,
+        workflow_id=run.workflow_id,
+        prompt=run.prompt,
+        parameter_blob=run.parameter_blob,
+        image_count=_extract_image_count(run.parameter_blob),
+        leased_until=run.leased_until,
+    )
 
 
 @router.get("", response_model=RunList)
@@ -112,6 +175,8 @@ def update_run_status(
     run = _get_run(session, run_id)
     run.status = payload.status
     run.updated_at = datetime.utcnow()
+    if payload.status in (RunStatus.READY, RunStatus.ERROR, RunStatus.APPROVED, RunStatus.POSTED):
+        run.leased_until = None
     session.add(run)
     session.commit()
     session.refresh(run)
@@ -139,6 +204,59 @@ def add_run_images(
     session.commit()
     session.refresh(run)
     return run
+
+
+@router.post(
+    "/{run_id}/images/upload",
+    response_model=RunImageRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def upload_run_image(
+    run_id: str,
+    ordinal: int = Query(..., ge=1, description="1-indexed position within the run"),
+    file: UploadFile = File(...),
+    session: Session = Depends(get_session),
+) -> RunImage:
+    """
+    Upload a generated image to MinIO and create the corresponding RunImage row.
+    """
+    run = _get_run(session, run_id)
+
+    data = file.file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty")
+
+    # Best-effort extension handling
+    filename = (file.filename or "image").strip() or "image"
+    _, ext = os.path.splitext(filename)
+    if not ext:
+        ext = ".png"
+
+    object_name = f"{run_id}/{int(time.time())}_{ordinal}{ext}"
+    try:
+        put_object_bytes(object_name=object_name, data=data, content_type=file.content_type)
+    except MinioConfigError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except MinioPutError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    bucket = get_settings().minio_bucket
+    asset_uri = f"s3://{bucket}/{object_name}"
+    img = RunImage(
+        run_id=run_id,
+        ordinal=ordinal,
+        asset_uri=asset_uri,
+        thumb_uri=None,
+        status=RunImageStatus.GENERATED,
+        notes=None,
+    )
+    run.updated_at = datetime.utcnow()
+
+    session.add(img)
+    session.add(run)
+    session.commit()
+    session.refresh(img)
+    return img
 
 
 @router.post("/{run_id}/images/{image_id}/approve", response_model=RunImageApprovalResponse)

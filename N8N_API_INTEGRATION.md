@@ -97,6 +97,35 @@ In n8n, create a workflow that starts with a **Webhook** node (POST) and use the
 - `approved` - Run has been approved
 - `error` - An error occurred
 
+### 1b. Lease the Next Run (Image Generator Worker)
+**Endpoint:** `POST http://api:8000/runs/lease`
+
+This is used by the image-generator worker to atomically claim a queued run.
+
+- Only runs with `status=queued` and `leased_until=null` are eligible.
+- Calling this endpoint sets `leased_until = now + 2 hours` and transitions the run to `status=generating`.
+- If no run is available, the API returns `204 No Content`.
+
+**Response (200):**
+```json
+{
+  "id": "run-uuid",
+  "workflow_id": "optional-workflow-id",
+  "prompt": "your prompt text here",
+  "parameter_blob": { "...": "..." },
+  "image_count": 10,
+  "leased_until": "2026-01-04T00:00:00"
+}
+```
+
+### 1c. Upload a Generated Image (API → MinIO)
+**Endpoint:** `POST http://api:8000/runs/{run_id}/images/upload?ordinal=1`
+
+Uploads a single generated image to MinIO and creates a `run_images` row for it.
+
+- **Content-Type:** `multipart/form-data`
+- **Form field:** `file` (the image file)
+
 ### 2. List Runs
 **Endpoint:** `GET http://api:8000/runs`
 
