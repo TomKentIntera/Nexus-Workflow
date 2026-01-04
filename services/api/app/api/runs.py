@@ -26,6 +26,7 @@ from ..schemas import (
 )
 from ..clients.minio_client import MinioConfigError, MinioPutError, put_object_bytes
 from ..config import get_settings
+from ..observability.newrelic_metrics import record_count
 
 router = APIRouter(prefix="/runs", tags=["runs"])
 
@@ -109,7 +110,10 @@ def create_run(payload: RunCreate, session: Session = Depends(get_session)) -> R
 
 
 @router.post("/lease", response_model=RunLeaseResponse)
-def lease_next_run(session: Session = Depends(get_session)) -> RunLeaseResponse:
+def lease_next_run(
+    x_machine_id: str | None = Header(default=None, alias="X-Machine-Id"),
+    session: Session = Depends(get_session),
+) -> RunLeaseResponse:
     """
     Lease the next available run for image generation.
 
@@ -148,6 +152,18 @@ def lease_next_run(session: Session = Depends(get_session)) -> RunLeaseResponse:
     )
     requested = _extract_image_count(run.parameter_blob)
     remaining = max(requested - int(generated_images or 0), 0)
+
+    record_count(
+        "wf.run.leased",
+        1,
+        attributes={
+            "run.id": run.id,
+            "run.workflow_id": run.workflow_id,
+            "machine.id": (x_machine_id.strip() if x_machine_id else None),
+            "run.requested_images": requested,
+            "run.remaining_images": remaining,
+        },
+    )
 
     return RunLeaseResponse(
         id=run.id,
@@ -291,6 +307,17 @@ def upload_run_image(
     session.add(run)
     session.commit()
     session.refresh(img)
+
+    record_count(
+        "wf.image.generated",
+        1,
+        attributes={
+            "run.id": run_id,
+            "image.id": img.id,
+            "image.ordinal": ordinal,
+            "machine.id": img.generated_by_machine_id,
+        },
+    )
     return img
 
 
