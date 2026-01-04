@@ -5,7 +5,7 @@ import re
 from pathlib import Path
 
 
-def _normalize_tags(tags: list[str]) -> list[str]:
+def normalize_tags(tags: list[str]) -> list[str]:
     out: list[str] = []
     seen: set[str] = set()
     for tag in tags:
@@ -37,13 +37,13 @@ def parse_banned_tags(raw: str | None) -> list[str]:
         try:
             loaded = json.loads(raw)
             if isinstance(loaded, list):
-                return _normalize_tags([str(x) for x in loaded])
+                return normalize_tags([str(x) for x in loaded])
         except Exception:
             # Fall through to delimiter splitting
             pass
 
     parts = re.split(r"[,\n;]+", raw)
-    return _normalize_tags([p for p in parts])
+    return normalize_tags([p for p in parts])
 
 
 def load_banned_tags_from_file(path: str | None) -> list[str] | None:

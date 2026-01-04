@@ -143,3 +143,11 @@ class RunImageList(BaseModel):
     total: int = 0
     limit: int = 0
     offset: int = 0
+
+
+class BannedTagsUpsert(BaseModel):
+    """
+    Add banned tags (idempotent).
+    """
+
+    tags: List[str] = Field(default_factory=list, description="Tags to add to the banned list")

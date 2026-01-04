@@ -33,6 +33,8 @@ Orchestrates an image-generation workflow built on n8n, FastAPI, MySQL, and MinI
 - `POST /runs/{id}/status` – update run lifecycle state.
 - `POST /runs/{run_id}/images/{image_id}/approve` – mark an image as approved and trigger webhooks.
 - `GET /banned-tags` – returns a JSON list of prohibited tags for workflow filtering.
+- `POST /banned-tags` – add one or more prohibited tags (idempotent).
+- `DELETE /banned-tags/{tag}` – remove a prohibited tag by exact match.
 
 ## Environment Highlights
 ### API (`services/api/.env`)
@@ -41,8 +43,7 @@ Orchestrates an image-generation workflow built on n8n, FastAPI, MySQL, and MinI
 - `WF_MINIO_PUBLIC_ENDPOINT=http://localhost:9000` (used for reviewer URLs)
 - `WF_MINIO_BUCKET=runs`
 - `WF_N8N_APPROVAL_WEBHOOK=http://n8n:5678/webhook/approval`
-- `WF_BANNED_TAGS=["English text","watermark","logo"]` (or CSV/newline-separated)
-- `WF_BANNED_TAGS_FILE=/path/to/banned_tags.txt` (optional; overrides `WF_BANNED_TAGS`)
+The banned-tag list is stored in the database table `banned_tags` and managed via the endpoints above.
 
 ### Reviewer (`services/reviewer/.env`)
 - `REVIEWER_API_BASE_URL=http://api:8000`
