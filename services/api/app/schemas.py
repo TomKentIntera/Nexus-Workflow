@@ -55,6 +55,7 @@ class RunRead(RunBase):
 class RunList(BaseModel):
     runs: List[RunRead]
     queued_count: int = 0
+    images_generated_last_hour: int = 0
 
 
 class RunImageApprovalRequest(BaseModel):
