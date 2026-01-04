@@ -60,6 +60,36 @@ def _extract_image_count(parameter_blob: Any | None) -> int:
         return 1
 
 
+def _next_scheduled_time(session: Session, now: datetime) -> datetime:
+    """
+    Compute the next scheduled time for an approved image.
+
+    scheduled_time = max(now, last_post_time + 30 minutes)
+
+    Where "last_post_time" is approximated as:
+    - max(run_images.scheduled_time) for previously scheduled approved/posted images, else
+    - max(run_image_approvals.approved_at) for approved/posted images (backfill-friendly).
+    """
+    last_scheduled = session.execute(
+        select(func.max(RunImage.scheduled_time)).where(
+            RunImage.scheduled_time.is_not(None),
+            RunImage.status.in_([RunImageStatus.APPROVED, RunImageStatus.POSTED]),
+        )
+    ).scalar_one()
+    if last_scheduled is None:
+        last_scheduled = session.execute(
+            select(func.max(RunImageApproval.approved_at))
+            .join(RunImage, RunImageApproval.run_image_id == RunImage.id)
+            .where(RunImage.status.in_([RunImageStatus.APPROVED, RunImageStatus.POSTED]))
+        ).scalar_one()
+
+    if last_scheduled is None:
+        return now
+
+    candidate = last_scheduled + timedelta(minutes=30)
+    return max(now, candidate)
+
+
 @router.post("", response_model=RunRead, status_code=status.HTTP_201_CREATED)
 def create_run(payload: RunCreate, session: Session = Depends(get_session)) -> Run:
     run = Run(
@@ -280,9 +310,12 @@ def approve_run_image(
     session: Session = Depends(get_session),
 ) -> RunImageApprovalResponse:
     image = _get_run_image(session, run_id, image_id)
+    now = datetime.utcnow()
     image.status = RunImageStatus.APPROVED
     image.notes = payload.notes or image.notes
-    image.run.updated_at = datetime.utcnow()
+    if image.scheduled_time is None:
+        image.scheduled_time = _next_scheduled_time(session=session, now=now)
+    image.run.updated_at = now
     image.run.status = RunStatus.APPROVED
 
     approval = RunImageApproval(
