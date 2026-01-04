@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Sequence
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -74,6 +74,14 @@ def list_runs(
     queued_count_stmt = select(func.count()).select_from(Run).where(Run.status == RunStatus.QUEUED)
     queued_count = session.execute(queued_count_stmt).scalar_one()
 
+    cutoff = datetime.utcnow() - timedelta(hours=1)
+    images_generated_last_hour_stmt = (
+        select(func.count())
+        .select_from(RunImage)
+        .where(RunImage.created_at >= cutoff)
+    )
+    images_generated_last_hour = session.execute(images_generated_last_hour_stmt).scalar_one()
+
     stmt = select(Run).options(selectinload(Run.images)).order_by(Run.created_at.desc())
     if status_filter:
         stmt = stmt.where(Run.status == status_filter)
@@ -83,7 +91,11 @@ def list_runs(
     # Exclude runs with POSTED status
     stmt = stmt.where(Run.status != RunStatus.POSTED)
     runs: Sequence[Run] = session.execute(stmt).unique().scalars().all()
-    return RunList(runs=runs, queued_count=queued_count)
+    return RunList(
+        runs=runs,
+        queued_count=queued_count,
+        images_generated_last_hour=images_generated_last_hour,
+    )
 
 
 @router.get("/{run_id}", response_model=RunRead)

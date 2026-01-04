@@ -263,8 +263,12 @@
                 select.innerHTML = '<option value="">Select a run...</option>';
                 const queuedEl = document.getElementById('queuedCount');
                 if (queuedEl) {
-                    queuedEl.textContent =
-                        typeof data.queued_count === 'number' ? `Queued: ${data.queued_count}` : '';
+                    const parts = [];
+                    if (typeof data.queued_count === 'number') parts.push(`Queued: ${data.queued_count}`);
+                    if (typeof data.images_generated_last_hour === 'number') {
+                        parts.push(`Images last hour: ${data.images_generated_last_hour}`);
+                    }
+                    queuedEl.textContent = parts.join(' | ');
                 }
                 data.runs.forEach(run => {
                     const option = document.createElement('option');
