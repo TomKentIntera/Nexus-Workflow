@@ -77,7 +77,9 @@ class RunLeaseResponse(BaseModel):
     workflow_id: Optional[str] = None
     prompt: str
     parameter_blob: Optional[Any] = Field(default=None, description="Opaque workflow payload")
-    image_count: int = Field(default=1, ge=1, description="Number of images to generate")
+    image_count: int = Field(default=1, ge=1, description="Total number of images requested for this run")
+    generated_images: int = Field(default=0, ge=0, description="Number of images already uploaded for this run")
+    remaining_images: int = Field(default=1, ge=0, description="Number of images remaining to generate/upload")
     leased_until: Optional[datetime] = None
 
 

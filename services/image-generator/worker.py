@@ -107,7 +107,10 @@ def process_queued_runs() -> None:
             run_id = leased["id"]
             prompt = (leased.get("prompt") or "").strip()
             parameters = _extract_parameters(leased.get("parameter_blob"))
-            num_images = int(leased.get("image_count") or parameters.get("image_count") or 1)
+            requested = int(leased.get("image_count") or parameters.get("image_count") or 1)
+            generated = int(leased.get("generated_images") or 0)
+            remaining = leased.get("remaining_images")
+            num_images = int(remaining if remaining is not None else max(requested - generated, 0))
 
             width = int(parameters.get("width", 1024))
             height = int(parameters.get("height", 1024))
@@ -125,15 +128,23 @@ def process_queued_runs() -> None:
 
             print(f"📋 Leased run: {run_id}")
             print(f"   Prompt: {prompt[:100]}...")
+            print(f"   Progress: {generated}/{requested} (remaining: {num_images})")
             print(f"   Generating {num_images} image(s) at {width}x{height}...")
 
             output_dir = os.environ.get("OUTPUT_DIR", "/app/generated-images")
 
             try:
+                if num_images <= 0:
+                    _set_run_status(api_base, run_id, "ready")
+                    print(f"✅ Run {run_id} already complete (no remaining images)")
+                    print()
+                    continue
+
                 base_seed = seed if seed is not None else None
                 uploaded = 0
 
                 for i in range(num_images):
+                    ordinal = generated + i + 1  # continue ordinals after already-uploaded images
                     current_seed = base_seed + i if base_seed is not None else None
                     image, actual_seed = model.generate_image(
                         prompt=prompt,
@@ -167,7 +178,7 @@ def process_queued_runs() -> None:
                     )
 
                     image_path = save_result["local_path"]
-                    if _upload_image(api_base, run_id, i + 1, image_path):
+                    if _upload_image(api_base, run_id, ordinal, image_path):
                         uploaded += 1
 
                 if uploaded == 0:

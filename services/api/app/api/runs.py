@@ -119,12 +119,21 @@ def lease_next_run(session: Session = Depends(get_session)) -> RunLeaseResponse:
     session.commit()
     session.refresh(run)
 
+    generated_images = (
+        session.execute(select(func.count()).select_from(RunImage).where(RunImage.run_id == run.id))
+        .scalar_one()
+    )
+    requested = _extract_image_count(run.parameter_blob)
+    remaining = max(requested - int(generated_images or 0), 0)
+
     return RunLeaseResponse(
         id=run.id,
         workflow_id=run.workflow_id,
         prompt=run.prompt,
         parameter_blob=run.parameter_blob,
-        image_count=_extract_image_count(run.parameter_blob),
+        image_count=requested,
+        generated_images=int(generated_images or 0),
+        remaining_images=remaining,
         leased_until=run.leased_until,
     )
 
