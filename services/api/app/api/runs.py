@@ -17,6 +17,8 @@ from ..schemas import (
     RunImageApprovalResponse,
     RunImageCreate,
     RunImageRead,
+    RunImageList,
+    RunImageListItem,
     RunList,
     RunLeaseResponse,
     RunRead,
@@ -346,3 +348,52 @@ def reject_run_image(
         "status": image.status.value,
         "message": "Image rejected successfully"
     }
+
+
+@router.get("/images", response_model=RunImageList)
+def list_run_images(
+    status_filter: RunImageStatus | None = Query(default=None, alias="status"),
+    limit: int = Query(default=48, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    session: Session = Depends(get_session),
+) -> RunImageList:
+    """
+    List run images with optional status filter and pagination.
+
+    Default ordering: newest first (created_at desc).
+    """
+    count_stmt = select(func.count()).select_from(RunImage)
+    if status_filter:
+        count_stmt = count_stmt.where(RunImage.status == status_filter)
+    total = int(session.execute(count_stmt).scalar_one() or 0)
+
+    stmt = (
+        select(RunImage)
+        .options(selectinload(RunImage.run))
+        .order_by(RunImage.created_at.desc())
+        .limit(limit)
+        .offset(offset)
+    )
+    if status_filter:
+        stmt = stmt.where(RunImage.status == status_filter)
+
+    images = session.execute(stmt).scalars().all()
+    items: list[RunImageListItem] = []
+    for img in images:
+        items.append(
+            RunImageListItem(
+                id=img.id,
+                run_id=img.run_id,
+                ordinal=img.ordinal,
+                asset_uri=img.asset_uri,
+                thumb_uri=img.thumb_uri,
+                generated_by_machine_id=img.generated_by_machine_id,
+                status=img.status,
+                notes=img.notes,
+                created_at=img.created_at,
+                run_created_at=(img.run.created_at if img.run else None),
+                prompt=(img.run.prompt if img.run else None),
+            )
+        )
+
+    return RunImageList(images=items, total=total, limit=limit, offset=offset)

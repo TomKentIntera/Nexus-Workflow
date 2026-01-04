@@ -136,6 +136,60 @@ async def stats_images_per_hour(hours: int = 24) -> Dict:
         raise HTTPException(status_code=502, detail=f"Failed to fetch stats: {exc}")
 
 
+@app.get("/api/stats/reviewer-summary", tags=["api"])
+async def reviewer_summary() -> Dict:
+    """Proxy reviewer summary endpoint from API service."""
+    try:
+        async with _api_client() as client:
+            response = await client.get("/stats/reviewer-summary")
+            response.raise_for_status()
+            return response.json()
+    except httpx.ConnectError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Cannot connect to API service at {settings.api_base_url}. Is the API service running?",
+        )
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to fetch reviewer summary: {exc}")
+
+
+@app.get("/api/stats/images-last-hour-by-machine", tags=["api"])
+async def images_last_hour_by_machine() -> Dict:
+    """Proxy last-hour-by-machine stats endpoint from API service."""
+    try:
+        async with _api_client() as client:
+            response = await client.get("/stats/images-last-hour-by-machine")
+            response.raise_for_status()
+            return response.json()
+    except httpx.ConnectError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Cannot connect to API service at {settings.api_base_url}. Is the API service running?",
+        )
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to fetch stats: {exc}")
+
+
+@app.get("/api/run-images", tags=["api"])
+async def list_run_images(status: str | None = None, limit: int = 48, offset: int = 0) -> Dict:
+    """Proxy run image listing endpoint from API service."""
+    try:
+        params: dict[str, object] = {"limit": limit, "offset": offset}
+        if status:
+            params["status"] = status
+        async with _api_client() as client:
+            response = await client.get("/runs/images", params=params)
+            response.raise_for_status()
+            return response.json()
+    except httpx.ConnectError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Cannot connect to API service at {settings.api_base_url}. Is the API service running?",
+        )
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to fetch run images: {exc}")
+
+
 @app.post("/api/runs/{run_id}/images/{image_id}/approve", tags=["api"])
 async def approve_image(run_id: str, image_id: str) -> Dict:
     """Approve an image."""
