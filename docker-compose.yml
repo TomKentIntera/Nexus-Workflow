@@ -194,16 +194,13 @@ services:
       - workflow_stack
     environment:
       PYTHONUNBUFFERED: "1"
+      # Point this at your API host when running generators on other machines
+      WF_API_BASE_URL: "http://api:8000"
       MINIO_ENDPOINT: "minio:9000"
       MINIO_ACCESS_KEY: "workflow"
       MINIO_SECRET_KEY: "workflow_secret"
       MINIO_BUCKET: "runs"
       MINIO_PUBLIC_BASE: "http://localhost:9000"
-      DB_HOST: "mysql"
-      DB_PORT: "3306"
-      DB_NAME: "workflow"
-      DB_USER: "workflow"
-      DB_PASSWORD: "workflow"
       WORKER_POLL_INTERVAL: "5"
       NVIDIA_VISIBLE_DEVICES: "all"
       NVIDIA_DRIVER_CAPABILITIES: "compute,utility"
@@ -216,7 +213,7 @@ services:
               capabilities: [gpu]
     depends_on:
       - minio
-      - mysql
+      - api
 
 networks:
   workflow_stack:

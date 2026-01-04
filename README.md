@@ -49,6 +49,9 @@ Orchestrates an image-generation workflow built on n8n, FastAPI, MySQL, and MinI
 ### n8n Generator Script
 Environment variables or CLI flags configure MinIO access: `MINIO_ENDPOINT`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`, `MINIO_BUCKET`, and `MINIO_PUBLIC_BASE`. See `services/n8n/scripts/images/generate.py` for full argument list.
 
+### Image Generator Worker (multi-machine)
+- `WF_API_BASE_URL=http://api:8000` (set this to the reachable API URL when the generator runs on a different host)
+
 ## Database Schema
 - `runs`: workflow metadata (prompt, status, JSON payload, timestamps).
 - `run_images`: generated image rows tied to runs, including ordinal, asset URI, status, notes.
