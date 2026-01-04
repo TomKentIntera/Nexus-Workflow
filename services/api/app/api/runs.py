@@ -64,24 +64,14 @@ def _next_scheduled_time(session: Session, now: datetime) -> datetime:
     """
     Compute the next scheduled time for an approved image.
 
-    scheduled_time = max(now, last_post_time + 30 minutes)
+    scheduled_time = max(now, last_scheduled_time + 30 minutes)
 
-    Where "last_post_time" is approximated as:
-    - max(run_images.scheduled_time) for previously scheduled approved/posted images, else
-    - max(run_image_approvals.approved_at) for approved/posted images (backfill-friendly).
+    We intentionally base this only on the latest non-null `run_images.scheduled_time`,
+    so scheduling always moves forward in 30-minute increments from the last scheduled post.
     """
     last_scheduled = session.execute(
-        select(func.max(RunImage.scheduled_time)).where(
-            RunImage.scheduled_time.is_not(None),
-            RunImage.status.in_([RunImageStatus.APPROVED, RunImageStatus.POSTED]),
-        )
+        select(func.max(RunImage.scheduled_time)).where(RunImage.scheduled_time.is_not(None))
     ).scalar_one()
-    if last_scheduled is None:
-        last_scheduled = session.execute(
-            select(func.max(RunImageApproval.approved_at))
-            .join(RunImage, RunImageApproval.run_image_id == RunImage.id)
-            .where(RunImage.status.in_([RunImageStatus.APPROVED, RunImageStatus.POSTED]))
-        ).scalar_one()
 
     if last_scheduled is None:
         return now
