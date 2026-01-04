@@ -125,6 +125,7 @@ Uploads a single generated image to MinIO and creates a `run_images` row for it.
 
 - **Content-Type:** `multipart/form-data`
 - **Form field:** `file` (the image file)
+- **Header:** `X-Machine-Id` (optional; identifies which generator node produced the image)
 
 ### 2. List Runs
 **Endpoint:** `GET http://api:8000/runs`

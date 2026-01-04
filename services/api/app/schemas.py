@@ -12,6 +12,7 @@ class RunImageCreate(BaseModel):
     ordinal: int
     asset_uri: str
     thumb_uri: Optional[str] = None
+    generated_by_machine_id: Optional[str] = None
     notes: Optional[str] = None
 
 
@@ -22,6 +23,7 @@ class RunImageRead(BaseModel):
     ordinal: int
     asset_uri: str
     thumb_uri: Optional[str] = None
+    generated_by_machine_id: Optional[str] = None
     status: RunImageStatus
     notes: Optional[str] = None
     created_at: datetime
@@ -102,3 +104,9 @@ class LinkSubmissionRead(BaseModel):
 
 class LinkSubmissionList(BaseModel):
     submissions: List[LinkSubmissionRead]
+
+
+class ImagesPerHourStats(BaseModel):
+    hours: List[str] = []
+    machines: List[str] = []
+    data: List[dict] = []

@@ -5,7 +5,7 @@ import os
 import time
 from typing import Any, List, Sequence
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile, status
+from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, Response, UploadFile, status
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session, selectinload
 
@@ -75,6 +75,7 @@ def create_run(payload: RunCreate, session: Session = Depends(get_session)) -> R
                 ordinal=image.ordinal,
                 asset_uri=image.asset_uri,
                 thumb_uri=image.thumb_uri,
+                generated_by_machine_id=getattr(image, "generated_by_machine_id", None),
                 notes=image.notes,
             )
         )
@@ -205,6 +206,7 @@ def add_run_images(
                 ordinal=image.ordinal,
                 asset_uri=image.asset_uri,
                 thumb_uri=image.thumb_uri,
+                generated_by_machine_id=getattr(image, "generated_by_machine_id", None),
                 notes=image.notes,
             )
         )
@@ -223,6 +225,7 @@ def add_run_images(
 def upload_run_image(
     run_id: str,
     ordinal: int = Query(..., ge=1, description="1-indexed position within the run"),
+    x_machine_id: str | None = Header(default=None, alias="X-Machine-Id"),
     file: UploadFile = File(...),
     session: Session = Depends(get_session),
 ) -> RunImage:
@@ -256,6 +259,7 @@ def upload_run_image(
         ordinal=ordinal,
         asset_uri=asset_uri,
         thumb_uri=None,
+        generated_by_machine_id=(x_machine_id.strip() if x_machine_id else None),
         status=RunImageStatus.GENERATED,
         notes=None,
     )

@@ -119,6 +119,23 @@ async def get_run(run_id: str) -> Dict:
         raise HTTPException(status_code=502, detail=f"Failed to fetch run: {exc}")
 
 
+@app.get("/api/stats/images-per-hour", tags=["api"])
+async def stats_images_per_hour(hours: int = 24) -> Dict:
+    """Proxy stats endpoint from API service."""
+    try:
+        async with _api_client() as client:
+            response = await client.get("/stats/images-per-hour", params={"hours": hours})
+            response.raise_for_status()
+            return response.json()
+    except httpx.ConnectError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Cannot connect to API service at {settings.api_base_url}. Is the API service running?",
+        )
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to fetch stats: {exc}")
+
+
 @app.post("/api/runs/{run_id}/images/{image_id}/approve", tags=["api"])
 async def approve_image(run_id: str, image_id: str) -> Dict:
     """Approve an image."""

@@ -13,6 +13,7 @@ from .api.autotag import router as autotag_router
 from .api.links import router as links_router
 from .api.platform import router as platform_router
 from .api.runs import router as runs_router
+from .api.stats import router as stats_router
 from .config import get_settings
 from .database import Base, SessionLocal, engine
 from .models import Run, RunStatus
@@ -85,3 +86,4 @@ app.include_router(platform_router)
 app.include_router(runs_router)
 app.include_router(autotag_router)
 app.include_router(links_router)
+app.include_router(stats_router)

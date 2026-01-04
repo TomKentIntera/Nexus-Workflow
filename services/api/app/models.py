@@ -62,6 +62,7 @@ class RunImage(Base):
     ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
     asset_uri: Mapped[str] = mapped_column(Text, nullable=False)
     thumb_uri: Mapped[str | None] = mapped_column(Text, nullable=True)
+    generated_by_machine_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     status: Mapped[RunImageStatus] = mapped_column(
         SqlEnum(RunImageStatus, name="run_image_status"),
         default=RunImageStatus.GENERATED,

@@ -8,6 +8,7 @@ import sys
 import traceback
 import json
 from typing import Any, Optional
+from uuid import uuid4
 
 import requests
 
@@ -29,6 +30,40 @@ def _extract_parameters(parameter_blob: Any | None) -> dict[str, Any]:
 
 def _api_base_url() -> str:
     return (os.environ.get("WF_API_BASE_URL") or os.environ.get("API_BASE_URL") or "http://api:8000").rstrip("/")
+
+
+def _machine_id() -> str:
+    """
+    Stable machine/node id.
+
+    Priority:
+    - WF_MACHINE_ID / MACHINE_ID env vars (explicit)
+    - persisted file under /app/hf_cache/machine_id (docker volume)
+    - generated uuid4 on first run
+    """
+    explicit = (os.environ.get("WF_MACHINE_ID") or os.environ.get("MACHINE_ID") or "").strip()
+    if explicit:
+        return explicit
+
+    base_dir = os.environ.get("HF_HOME", "/app/hf_cache")
+    os.makedirs(base_dir, exist_ok=True)
+    path = os.path.join(base_dir, "machine_id")
+    try:
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                v = (f.read() or "").strip()
+                if v:
+                    return v
+    except Exception:
+        pass
+
+    v = str(uuid4())
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(v)
+    except Exception:
+        pass
+    return v
 
 
 def _lease_next_run(api_base: str) -> Optional[dict[str, Any]]:
@@ -55,12 +90,14 @@ def _lease_next_run(api_base: str) -> Optional[dict[str, Any]]:
 
 def _upload_image(api_base: str, run_id: str, ordinal: int, image_path: str) -> bool:
     try:
+        machine_id = _machine_id()
         with open(image_path, "rb") as f:
             files = {"file": (os.path.basename(image_path), f, "image/png")}
             resp = requests.post(
                 f"{api_base}/runs/{run_id}/images/upload",
                 params={"ordinal": ordinal},
                 files=files,
+                headers={"X-Machine-Id": machine_id},
                 timeout=60,
             )
         if not resp.ok:
@@ -84,10 +121,12 @@ def process_queued_runs() -> None:
     poll_interval = int(os.environ.get("WORKER_POLL_INTERVAL", "5"))  # seconds
     model_id = os.environ.get("MODEL_ID", "Heartsync/NSFW-Uncensored")
     api_base = _api_base_url()
+    machine_id = _machine_id()
     
     print("🚀 Image Generation Worker started")
     print(f"   Polling every {poll_interval} seconds")
     print(f"   Leasing runs from API: {api_base}")
+    print(f"   Machine ID: {machine_id}")
     print()
     
     # Load model once at startup
