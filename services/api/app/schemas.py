@@ -110,3 +110,35 @@ class ImagesPerHourStats(BaseModel):
     hours: List[str] = []
     machines: List[str] = []
     data: List[dict] = []
+
+
+class ReviewerSummary(BaseModel):
+    approved_images: int = 0
+    runs_need_review: int = 0
+    images_generated_last_hour: int = 0
+
+
+class ImagesLastHourByMachine(BaseModel):
+    data: List[dict] = []
+    total: int = 0
+
+
+class RunImageListItem(BaseModel):
+    id: str
+    run_id: str
+    ordinal: int
+    asset_uri: str
+    thumb_uri: Optional[str] = None
+    generated_by_machine_id: Optional[str] = None
+    status: RunImageStatus
+    notes: Optional[str] = None
+    created_at: datetime
+    run_created_at: Optional[datetime] = None
+    prompt: Optional[str] = None
+
+
+class RunImageList(BaseModel):
+    images: List[RunImageListItem] = []
+    total: int = 0
+    limit: int = 0
+    offset: int = 0
