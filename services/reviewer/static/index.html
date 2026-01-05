@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Image Reviewer</title>
+    <title>Reviewer</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -19,12 +19,71 @@
             padding: 24px;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
-        h1 { margin-bottom: 24px; color: #333; }
+        h1 { margin-bottom: 6px; color: #333; }
+        .subhead { color: #666; margin-bottom: 18px; }
+        .nav {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin: 18px 0 20px;
+        }
+        .nav button {
+            background: #6c757d;
+        }
+        .nav button.active {
+            background: #0d6efd;
+        }
+        .page { display: none; }
+        .page.active { display: block; }
+        .cards {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            gap: 12px;
+            margin: 16px 0 18px;
+        }
+        .card {
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 8px;
+            padding: 16px;
+        }
+        .card .label { color: #6c757d; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
+        .card .value { font-size: 28px; font-weight: 700; margin-top: 8px; color: #212529; }
+        .card .hint { margin-top: 8px; color: #6c757d; font-size: 13px; }
+        .home-actions {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+            margin-top: 10px;
+        }
+        .home-actions button { background: #0d6efd; }
         .controls {
             display: flex;
             gap: 12px;
             margin-bottom: 24px;
             flex-wrap: wrap;
+        }
+        .stats {
+            background: #f8f9fa;
+            padding: 16px;
+            border-radius: 4px;
+            margin-bottom: 24px;
+        }
+        .stats table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 12px;
+            background: white;
+        }
+        .stats th, .stats td {
+            border: 1px solid #e5e5e5;
+            padding: 8px;
+            font-size: 12px;
+            text-align: left;
+            white-space: nowrap;
+        }
+        .stats th {
+            background: #f1f3f5;
         }
         select, input, button {
             padding: 10px 16px;
@@ -44,6 +103,8 @@
         button.approve:hover { background: #218838; }
         button.reject { background: #dc3545; }
         button.reject:hover { background: #c82333; }
+        button.danger { background: #dc3545; }
+        button.danger:hover { background: #c82333; }
         button:disabled { background: #ccc; cursor: not-allowed; }
         button:hover { opacity: 0.9; }
         .run-info {
@@ -183,30 +244,150 @@
             padding: 40px;
             color: #666;
         }
+        .muted { color: #6c757d; }
+        .posted-controls {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            flex-wrap: wrap;
+            margin-bottom: 14px;
+        }
+        .posted-controls button { background: #0d6efd; }
+        .posted-controls button.secondary { background: #6c757d; }
+        .chart-wrap {
+            background: #fff;
+            border: 1px solid #e9ecef;
+            border-radius: 8px;
+            padding: 12px;
+            margin-top: 12px;
+        }
+        .inline-actions {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            align-items: center;
+            margin: 12px 0 14px;
+        }
+        .inline-actions button { background: #0d6efd; }
+        .inline-actions button.danger { background: #dc3545; }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>Image Reviewer</h1>
-        <div class="controls">
-            <select id="runSelect">
-                <option value="">Loading runs...</option>
-            </select>
-            <button onclick="refreshRuns()">Refresh</button>
-            <span id="queuedCount" style="align-self: center; color: #666;"></span>
-            <button onclick="selectAllPending()" style="background: #17a2b8;">Select All Pending</button>
-            <button class="approve" onclick="approveSelected()">Approve Selected</button>
-            <button class="reject" onclick="rejectSelected()">Reject Selected</button>
+        <h1>Reviewer</h1>
+        <div class="subhead">Home, Review, Posted, and Stats</div>
+
+        <div class="nav">
+            <button id="navHome" onclick="navigate('home')">Home</button>
+            <button id="navReview" onclick="navigate('review')">Review</button>
+            <button id="navPosted" onclick="navigate('posted')">Posted</button>
+            <button id="navStats" onclick="navigate('stats')">Stats</button>
+            <button id="navBanned" onclick="navigate('banned')">Banned Tags</button>
         </div>
-        <div id="runInfo" style="display: none;">
-            <div class="run-info">
-                <h2 id="runId"></h2>
-                <p><strong>Prompt:</strong> <span id="runPrompt"></span></p>
-                <p><strong>Status:</strong> <span id="runStatus"></span></p>
-                <p><strong>Images:</strong> <span id="imageCount"></span></p>
+
+        <div id="pageHome" class="page">
+            <div class="cards">
+                <div class="card">
+                    <div class="label">Approved images</div>
+                    <div class="value" id="homeApproved">—</div>
+                    <div class="hint">Images with status APPROVED (awaiting posting)</div>
+                </div>
+                <div class="card">
+                    <div class="label">Posted images</div>
+                    <div class="value" id="homePosted">—</div>
+                    <div class="hint">Images with status POSTED</div>
+                </div>
+                <div class="card">
+                    <div class="label">Runs needing review</div>
+                    <div class="value" id="homeNeedReview">—</div>
+                    <div class="hint">Runs with at least one GENERATED image</div>
+                </div>
+                <div class="card">
+                    <div class="label">Images generated last hour</div>
+                    <div class="value" id="homeLastHour">—</div>
+                    <div class="hint">Created in the last 60 minutes</div>
+                </div>
             </div>
-            <div class="gallery" id="gallery"></div>
+            <div class="home-actions">
+                <button onclick="navigate('review')">Go to Review</button>
+                <button onclick="navigate('posted')">Go to Posted</button>
+                <button onclick="navigate('stats')">Go to Stats</button>
+                <button style="background:#6c757d;" onclick="refreshHome()">Refresh</button>
+            </div>
         </div>
+
+        <div id="pageReview" class="page">
+            <div class="controls">
+                <select id="runSelect">
+                    <option value="">Loading runs...</option>
+                </select>
+                <button onclick="refreshRuns()">Refresh</button>
+                <span id="queuedCount" style="align-self: center; color: #666;"></span>
+                <button onclick="selectAllPending()" style="background: #17a2b8;">Select All Pending</button>
+                <button class="approve" onclick="approveSelected()">Approve Selected</button>
+                <button class="reject" onclick="rejectSelected()">Reject Selected</button>
+            </div>
+            <div id="runInfo" style="display: none;">
+                <div class="run-info">
+                    <h2 id="runId"></h2>
+                    <p><strong>Prompt:</strong> <span id="runPrompt"></span></p>
+                    <p><strong>Status:</strong> <span id="runStatus"></span></p>
+                    <p><strong>Images:</strong> <span id="imageCount"></span></p>
+                </div>
+                <div class="gallery" id="gallery"></div>
+            </div>
+        </div>
+
+        <div id="pagePosted" class="page">
+            <div class="posted-controls">
+                <div style="font-weight:600;">Posted images</div>
+                <label class="muted">Page size:
+                    <select id="postedPageSize" style="min-width:120px; flex: unset;">
+                        <option value="24">24</option>
+                        <option value="48" selected>48</option>
+                        <option value="96">96</option>
+                    </select>
+                </label>
+                <button class="secondary" onclick="postedPrev()">Prev</button>
+                <button onclick="postedNext()">Next</button>
+                <span class="muted" id="postedPageInfo"></span>
+                <button class="secondary" onclick="refreshPosted()">Refresh</button>
+            </div>
+            <div class="gallery" id="postedGallery"></div>
+        </div>
+
+        <div id="pageStats" class="page">
+            <div class="stats">
+                <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
+                    <div style="font-weight:600;">Images generated in the last hour by machine</div>
+                    <button onclick="loadLastHourStats()">Refresh</button>
+                    <span class="muted" id="statsTotal"></span>
+                </div>
+                <div id="statsLastHourTableWrap"></div>
+                <div class="chart-wrap">
+                    <canvas id="statsChart" width="1200" height="340" style="width:100%; height:340px;"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <div id="pageBanned" class="page">
+            <div class="stats">
+                <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
+                    <div style="font-weight:600;">Banned tags</div>
+                    <button onclick="loadBannedTags()">Refresh</button>
+                    <span class="muted" id="bannedCount"></span>
+                </div>
+                <div class="inline-actions">
+                    <input id="bannedTagInput" placeholder="e.g. English text" />
+                    <button onclick="addBannedTag()">Add banned tag</button>
+                </div>
+                <div id="bannedTagsTableWrap"></div>
+                <div class="muted" style="margin-top:10px;">
+                    Note: adding a banned tag will automatically delete any queued runs that contain it.
+                </div>
+            </div>
+        </div>
+
         <div id="status" class="status"></div>
         <div id="loading" class="loading" style="display: none;">Loading...</div>
     </div>
@@ -218,6 +399,238 @@
         let selectedImages = new Set();
         let currentRunId = null;
         let imageMap = {};
+        const postedState = { limit: 48, offset: 0, total: 0 };
+
+        function navigate(page) {
+            location.hash = `#/${page}`;
+        }
+
+        function setActivePage(page) {
+            const pages = ['home', 'review', 'posted', 'stats', 'banned'];
+            pages.forEach(p => {
+                document.getElementById(`page${p.charAt(0).toUpperCase() + p.slice(1)}`).classList.toggle('active', p === page);
+                document.getElementById(`nav${p.charAt(0).toUpperCase() + p.slice(1)}`).classList.toggle('active', p === page);
+            });
+
+            if (page === 'home') refreshHome();
+            if (page === 'review') {
+                if (!document.getElementById('runSelect').dataset.loaded) fetchRuns();
+            }
+            if (page === 'posted') refreshPosted();
+            if (page === 'stats') loadLastHourStats();
+            if (page === 'banned') loadBannedTags();
+        }
+
+        function onRoute() {
+            const hash = (location.hash || '#/home').replace(/^#\/?/, '');
+            const page = (hash.split('/')[0] || 'home').trim();
+            if (!['home', 'review', 'posted', 'stats', 'banned'].includes(page)) {
+                setActivePage('home');
+            } else {
+                setActivePage(page);
+            }
+        }
+
+        async function refreshHome() {
+            try {
+                const res = await fetch('/api/stats/reviewer-summary');
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const s = await res.json();
+                document.getElementById('homeApproved').textContent = (s.approved_images ?? 0).toString();
+                document.getElementById('homePosted').textContent = (s.posted_images ?? 0).toString();
+                document.getElementById('homeNeedReview').textContent = (s.runs_need_review ?? 0).toString();
+                document.getElementById('homeLastHour').textContent = (s.images_generated_last_hour ?? 0).toString();
+            } catch (e) {
+                showStatus('Error loading summary: ' + e.message, 'error');
+            }
+        }
+
+        async function loadLastHourStats() {
+            const wrap = document.getElementById('statsLastHourTableWrap');
+            const totalEl = document.getElementById('statsTotal');
+            wrap.innerHTML = 'Loading stats...';
+            totalEl.textContent = '';
+            try {
+                const response = await fetch(`/api/stats/images-last-hour-by-machine`);
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const payload = await response.json();
+                const rows = payload.data || [];
+                const total = payload.total || 0;
+                totalEl.textContent = `Total: ${total}`;
+
+                if (!rows.length) {
+                    wrap.innerHTML = '<div style="margin-top:12px; color:#666;">No images generated in the last hour.</div>';
+                    drawBarChart([], []);
+                    return;
+                }
+
+                let html = '<table><thead><tr><th>Machine</th><th>Count</th></tr></thead><tbody>';
+                rows.forEach(r => {
+                    html += `<tr><td>${escapeHtml(r.machine_id ?? 'unknown')}</td><td>${r.count ?? 0}</td></tr>`;
+                });
+                html += '</tbody></table>';
+                wrap.innerHTML = html;
+
+                const labels = rows.map(r => (r.machine_id ?? 'unknown').toString());
+                const values = rows.map(r => Number(r.count ?? 0));
+                drawBarChart(labels, values);
+            } catch (error) {
+                wrap.innerHTML = `<div style="margin-top:12px; color:#b02a37;">Error loading stats: ${error.message}</div>`;
+                drawBarChart([], []);
+            }
+        }
+
+        function drawBarChart(labels, values) {
+            const canvas = document.getElementById('statsChart');
+            const ctx = canvas.getContext('2d');
+            if (!ctx) return;
+
+            // Clear
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Basic layout
+            const padding = { left: 60, right: 20, top: 20, bottom: 80 };
+            const w = canvas.width - padding.left - padding.right;
+            const h = canvas.height - padding.top - padding.bottom;
+
+            // Axes
+            ctx.strokeStyle = '#dee2e6';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(padding.left, padding.top);
+            ctx.lineTo(padding.left, padding.top + h);
+            ctx.lineTo(padding.left + w, padding.top + h);
+            ctx.stroke();
+
+            if (!labels.length) {
+                ctx.fillStyle = '#6c757d';
+                ctx.font = '14px system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
+                ctx.fillText('No data', padding.left + 10, padding.top + 24);
+                return;
+            }
+
+            const maxVal = Math.max(1, ...values);
+            const barGap = 10;
+            const barW = Math.max(8, Math.floor((w - barGap * (labels.length - 1)) / labels.length));
+            const scaleY = h / maxVal;
+
+            // Bars
+            labels.forEach((label, i) => {
+                const v = values[i] || 0;
+                const barH = Math.round(v * scaleY);
+                const x = padding.left + i * (barW + barGap);
+                const y = padding.top + h - barH;
+
+                ctx.fillStyle = '#0d6efd';
+                ctx.fillRect(x, y, barW, barH);
+
+                // value label
+                ctx.fillStyle = '#212529';
+                ctx.font = '12px system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText(String(v), x + barW / 2, y - 6);
+
+                // x label (rotated)
+                ctx.save();
+                ctx.translate(x + barW / 2, padding.top + h + 10);
+                ctx.rotate(-Math.PI / 5);
+                ctx.fillStyle = '#495057';
+                ctx.textAlign = 'right';
+                ctx.fillText(label, 0, 0);
+                ctx.restore();
+            });
+        }
+
+        async function loadBannedTags() {
+            const wrap = document.getElementById('bannedTagsTableWrap');
+            const countEl = document.getElementById('bannedCount');
+            wrap.innerHTML = 'Loading...';
+            countEl.textContent = '';
+            try {
+                const res = await fetch('/api/banned-tags');
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const tags = await res.json();
+                const rows = (Array.isArray(tags) ? tags : []).map(t => String(t)).sort((a, b) => a.localeCompare(b));
+                countEl.textContent = `Count: ${rows.length}`;
+
+                if (!rows.length) {
+                    wrap.innerHTML = '<div style="margin-top:12px; color:#666;">No banned tags yet.</div>';
+                    return;
+                }
+
+                let html = '<table><thead><tr><th>Tag</th><th style="width:140px;">Action</th></tr></thead><tbody>';
+                rows.forEach(tag => {
+                    html += `<tr>
+                        <td>${escapeHtml(tag)}</td>
+                        <td>
+                            <button class="danger" data-tag="${escapeHtml(tag)}">Remove</button>
+                        </td>
+                    </tr>`;
+                });
+                html += '</tbody></table>';
+                wrap.innerHTML = html;
+
+                // Attach click handlers without relying on inline JS escaping.
+                wrap.querySelectorAll('button[data-tag]').forEach(btn => {
+                    btn.addEventListener('click', () => removeBannedTag(btn.getAttribute('data-tag')));
+                });
+            } catch (e) {
+                wrap.innerHTML = `<div style="margin-top:12px; color:#b02a37;">Error loading banned tags: ${e.message}</div>`;
+            }
+        }
+
+        async function addBannedTag() {
+            const input = document.getElementById('bannedTagInput');
+            const tag = (input.value || '').trim();
+            if (!tag) {
+                showStatus('Please enter a tag to ban', 'error');
+                return;
+            }
+            try {
+                const res = await fetch('/api/banned-tags', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ tags: [tag] })
+                });
+                if (!res.ok) {
+                    const text = await res.text();
+                    throw new Error(text || `HTTP ${res.status}`);
+                }
+                input.value = '';
+                showStatus(`Banned tag added: ${tag}`, 'success');
+                loadBannedTags();
+                // Also refresh runs list, since queued runs may have been purged.
+                fetchRuns();
+            } catch (e) {
+                showStatus('Error adding banned tag: ' + e.message, 'error');
+            }
+        }
+
+        async function removeBannedTag(tag) {
+            // tag comes from data-tag, so it is already HTML-decoded by the browser
+            const t = (tag || '').trim();
+            if (!t) return;
+            try {
+                const res = await fetch(`/api/banned-tags/${encodeURIComponent(t)}`, { method: 'DELETE' });
+                if (!res.ok) {
+                    const text = await res.text();
+                    throw new Error(text || `HTTP ${res.status}`);
+                }
+                showStatus(`Removed banned tag: ${t}`, 'success');
+                loadBannedTags();
+            } catch (e) {
+                showStatus('Error removing banned tag: ' + e.message, 'error');
+            }
+        }
+
+        function escapeHtml(str) {
+            return String(str)
+                .replaceAll('&', '&amp;')
+                .replaceAll('<', '&lt;')
+                .replaceAll('>', '&gt;')
+                .replaceAll('"', '&quot;')
+                .replaceAll("'", '&#039;');
+        }
 
         function convertUrl(url) {
             if (url.startsWith('s3://')) {
@@ -260,6 +673,7 @@
                 const response = await fetch('/api/runs');
                 const data = await response.json();
                 const select = document.getElementById('runSelect');
+                select.dataset.loaded = '1';
                 select.innerHTML = '<option value="">Select a run...</option>';
                 const queuedEl = document.getElementById('queuedCount');
                 if (queuedEl) {
@@ -389,7 +803,7 @@
 
         function selectAllPending() {
             // Select all images that haven't been approved/rejected/posted (status GENERATED)
-            document.querySelectorAll('.image-card').forEach(card => {
+            document.querySelectorAll('#gallery .image-card').forEach(card => {
                 // Check if the card doesn't have approved, rejected, or posted class
                 if (!card.classList.contains('approved') && 
                     !card.classList.contains('rejected') && 
@@ -456,7 +870,7 @@
             if (failed === 0) {
                 showStatus(`Successfully ${action}d ${success} image(s)`, 'success');
                 selectedImages.clear();
-                document.querySelectorAll('.image-card.selected').forEach(card => {
+                document.querySelectorAll('#gallery .image-card.selected').forEach(card => {
                     card.classList.remove('selected');
                 });
                 loadRun(currentRunId); // Reload to show updated status
@@ -467,6 +881,73 @@
 
         function refreshRuns() {
             fetchRuns();
+        }
+
+        async function refreshPosted() {
+            const limit = parseInt(document.getElementById('postedPageSize').value || '48', 10);
+            postedState.limit = limit;
+            // Keep offset in range
+            postedState.offset = Math.max(0, postedState.offset);
+            await loadPosted();
+        }
+
+        async function loadPosted() {
+            const gallery = document.getElementById('postedGallery');
+            const info = document.getElementById('postedPageInfo');
+            gallery.innerHTML = '';
+            info.textContent = 'Loading...';
+            try {
+                const url = `/api/run-images?status=POSTED&limit=${encodeURIComponent(postedState.limit)}&offset=${encodeURIComponent(postedState.offset)}`;
+                const res = await fetch(url);
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const payload = await res.json();
+                const images = payload.images || [];
+                postedState.total = payload.total || 0;
+
+                if (!images.length) {
+                    gallery.innerHTML = '<div class="muted" style="padding:16px;">No posted images found.</div>';
+                } else {
+                    images.forEach(image => {
+                        const httpUrl = convertUrl(image.asset_uri);
+                        imageMap[image.id] = httpUrl;
+                        const card = document.createElement('div');
+                        card.className = 'image-card posted';
+                        card.dataset.imageId = image.id;
+                        const ts = image.created_at ? new Date(image.created_at).toLocaleString() : '';
+                        const runShort = image.run_id ? `${image.run_id.substring(0, 8)}...` : '';
+                        card.innerHTML = `
+                            <img src="${httpUrl}" alt="Posted image"
+                                 onclick="openLightbox('${image.id}')"
+                                 onerror="this.src='data:image/svg+xml,%3Csvg xmlns=\\'http://www.w3.org/2000/svg\\' width=\\'200\\' height=\\'200\\'%3E%3Ctext x=\\'50%25\\' y=\\'50%25\\' text-anchor=\\'middle\\'%3EFailed to load%3C/text%3E%3C/svg%3E'">
+                            <div class="status-overlay"><div class="status-label">POSTED</div></div>
+                            <div class="info">
+                                ${escapeHtml(ts)}<br>
+                                Run: ${escapeHtml(runShort)} &nbsp; #${image.ordinal ?? ''}
+                            </div>
+                        `;
+                        gallery.appendChild(card);
+                    });
+                }
+
+                const start = postedState.total === 0 ? 0 : postedState.offset + 1;
+                const end = Math.min(postedState.offset + postedState.limit, postedState.total);
+                info.textContent = `Showing ${start}-${end} of ${postedState.total}`;
+            } catch (e) {
+                info.textContent = '';
+                showStatus('Error loading posted images: ' + e.message, 'error');
+            }
+        }
+
+        function postedPrev() {
+            postedState.offset = Math.max(0, postedState.offset - postedState.limit);
+            loadPosted();
+        }
+
+        function postedNext() {
+            const next = postedState.offset + postedState.limit;
+            if (postedState.total && next >= postedState.total) return;
+            postedState.offset = next;
+            loadPosted();
         }
 
         function showStatus(message, type) {
@@ -483,7 +964,11 @@
         document.getElementById('runSelect').addEventListener('change', (e) => {
             loadRun(e.target.value);
         });
-        fetchRuns();
+        document.getElementById('bannedTagInput').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') addBannedTag();
+        });
+        window.addEventListener('hashchange', onRoute);
+        onRoute();
     </script>
 </body>
 </html>

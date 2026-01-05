@@ -12,6 +12,7 @@ class RunImageCreate(BaseModel):
     ordinal: int
     asset_uri: str
     thumb_uri: Optional[str] = None
+    generated_by_machine_id: Optional[str] = None
     notes: Optional[str] = None
 
 
@@ -22,6 +23,7 @@ class RunImageRead(BaseModel):
     ordinal: int
     asset_uri: str
     thumb_uri: Optional[str] = None
+    generated_by_machine_id: Optional[str] = None
     status: RunImageStatus
     notes: Optional[str] = None
     created_at: datetime
@@ -47,6 +49,7 @@ class RunRead(RunBase):
 
     id: str
     status: RunStatus
+    leased_until: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
     images: List[RunImageRead] = []
@@ -69,6 +72,19 @@ class RunImageApprovalResponse(BaseModel):
     webhook_status: str
 
 
+class RunLeaseResponse(BaseModel):
+    """Response returned to an image-generator when leasing a run."""
+
+    id: str
+    workflow_id: Optional[str] = None
+    prompt: str
+    parameter_blob: Optional[Any] = Field(default=None, description="Opaque workflow payload")
+    image_count: int = Field(default=1, ge=1, description="Total number of images requested for this run")
+    generated_images: int = Field(default=0, ge=0, description="Number of images already uploaded for this run")
+    remaining_images: int = Field(default=1, ge=0, description="Number of images remaining to generate/upload")
+    leased_until: Optional[datetime] = None
+
+
 class LinkSubmissionCreate(BaseModel):
     url: AnyHttpUrl
     source_url: Optional[AnyHttpUrl] = None
@@ -88,3 +104,50 @@ class LinkSubmissionRead(BaseModel):
 
 class LinkSubmissionList(BaseModel):
     submissions: List[LinkSubmissionRead]
+
+
+class ImagesPerHourStats(BaseModel):
+    hours: List[str] = []
+    machines: List[str] = []
+    data: List[dict] = []
+
+
+class ReviewerSummary(BaseModel):
+    approved_images: int = 0
+    posted_images: int = 0
+    runs_need_review: int = 0
+    images_generated_last_hour: int = 0
+
+
+class ImagesLastHourByMachine(BaseModel):
+    data: List[dict] = []
+    total: int = 0
+
+
+class RunImageListItem(BaseModel):
+    id: str
+    run_id: str
+    ordinal: int
+    asset_uri: str
+    thumb_uri: Optional[str] = None
+    generated_by_machine_id: Optional[str] = None
+    status: RunImageStatus
+    notes: Optional[str] = None
+    created_at: datetime
+    run_created_at: Optional[datetime] = None
+    prompt: Optional[str] = None
+
+
+class RunImageList(BaseModel):
+    images: List[RunImageListItem] = []
+    total: int = 0
+    limit: int = 0
+    offset: int = 0
+
+
+class BannedTagsUpsert(BaseModel):
+    """
+    Add banned tags (idempotent).
+    """
+
+    tags: List[str] = Field(default_factory=list, description="Tags to add to the banned list")

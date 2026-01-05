@@ -18,6 +18,12 @@ class Settings(BaseSettings):
     cors_allow_origins: str = "*"
     n8n_link_submission_webhook: Optional[HttpUrl] = None
 
+    # Tag filtering (used by n8n workflows)
+    # - WF_BANNED_TAGS: comma/newline-separated or JSON list (e.g. '["English text","logo"]')
+    # - WF_BANNED_TAGS_FILE: optional path to a file containing tags (one per line or comma-separated)
+    banned_tags: str = ""
+    banned_tags_file: Optional[str] = None
+
     # WD1.4 (SmilingWolf wd-v1-4-convnext-tagger) autotagging settings
     wd14_repo_id: str = "SmilingWolf/wd-v1-4-convnext-tagger"
     wd14_model_filename: str = "model.onnx"

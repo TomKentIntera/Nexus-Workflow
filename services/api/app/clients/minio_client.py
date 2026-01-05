@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import io
 from typing import Optional
 from urllib.parse import urlparse
 
@@ -73,4 +74,42 @@ def get_object_bytes(*, object_name: str, bucket: str | None = None) -> MinioObj
         content_type=content_type,
         data=data,
     )
+
+
+class MinioPutError(RuntimeError):
+    """Raised when an object cannot be uploaded to MinIO."""
+
+
+def put_object_bytes(
+    *,
+    object_name: str,
+    data: bytes,
+    content_type: str | None = None,
+    bucket: str | None = None,
+) -> str:
+    """Upload bytes to MinIO and return the object key used."""
+    settings = get_settings()
+    bucket_name = bucket or settings.minio_bucket
+    client = _build_minio_client()
+
+    try:
+        if not client.bucket_exists(bucket_name):
+            client.make_bucket(bucket_name)
+    except S3Error as exc:
+        raise MinioPutError(f"MinIO error ensuring bucket '{bucket_name}': {exc}") from exc
+
+    try:
+        client.put_object(
+            bucket_name,
+            object_name,
+            io.BytesIO(data),
+            length=len(data),
+            content_type=content_type or "application/octet-stream",
+        )
+    except S3Error as exc:
+        raise MinioPutError(f"MinIO error uploading '{bucket_name}/{object_name}': {exc}") from exc
+    except Exception as exc:  # pragma: no cover
+        raise MinioPutError(f"Error uploading '{bucket_name}/{object_name}' to MinIO: {exc}") from exc
+
+    return object_name
 
