@@ -362,8 +362,8 @@ Examples:
     )
     parser.add_argument(
         "--negative-prompt",
-        default="blurry, low quality, distorted, watermark, text",
-        help="Negative prompt (default: 'blurry, low quality, distorted, watermark, text')"
+        default="blurry, low quality, distorted, watermark, text, patreon logo",
+        help="Negative prompt (default: 'blurry, low quality, distorted, watermark, text, patreon logo')"
     )
     parser.add_argument(
         "--steps",

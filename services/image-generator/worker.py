@@ -154,7 +154,7 @@ def process_queued_runs() -> None:
             width = int(parameters.get("width", 1024))
             height = int(parameters.get("height", 1024))
             negative_prompt = parameters.get(
-                "negative_prompt", "blurry, low quality, distorted, watermark, text"
+                "negative_prompt", "blurry, low quality, distorted, watermark, text, patreon logo"
             )
             num_inference_steps = int(parameters.get("steps", 28))
             guidance_scale = float(parameters.get("guidance", 7.5))

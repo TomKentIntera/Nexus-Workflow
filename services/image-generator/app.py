@@ -113,7 +113,7 @@ def run_generation_task(
             num_images=num_images,
             webhook_url=webhook_url,
             output_dir=output_dir,
-            negative_prompt=negative_prompt or "blurry, low quality, distorted, watermark, text",
+            negative_prompt=negative_prompt or "blurry, low quality, distorted, watermark, text, patreon logo",
             num_inference_steps=num_inference_steps or 28,
             guidance_scale=guidance_scale or 7.5,
             width=width or 1024,
