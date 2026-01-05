@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import update
 
 from .api.autotag import router as autotag_router
+from .api.allowed_search_tags import router as allowed_search_tags_router
 from .api.banned_tags import router as banned_tags_router
 from .api.links import router as links_router
 from .api.platform import router as platform_router
@@ -86,6 +87,7 @@ async def health_check() -> dict[str, str]:
 app.include_router(platform_router)
 app.include_router(runs_router)
 app.include_router(autotag_router)
+app.include_router(allowed_search_tags_router)
 app.include_router(banned_tags_router)
 app.include_router(links_router)
 app.include_router(stats_router)
