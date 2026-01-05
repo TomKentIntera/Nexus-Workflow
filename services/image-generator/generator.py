@@ -18,6 +18,8 @@ from minio.error import S3Error
 from sqlalchemy.orm import Session
 from db import RunImage, RunImageStatus
 
+from prompts import DEFAULT_NEGATIVE_PROMPT, DEFAULT_NEGATIVE_PROMPT_FOR_RUN
+
 # Set Hugging Face cache directory
 os.environ["HF_HOME"] = os.path.join(os.getcwd(), "hf_cache")
 os.environ["HF_HUB_CACHE"] = os.path.join(os.getcwd(), "hf_cache")
@@ -389,7 +391,7 @@ def generate_images_for_run(
     prompt: str,
     num_images: int = 1,
     output_dir: str = "./generated-images",
-    negative_prompt: str = "blurry, low quality, distorted, watermark, text, speech bubble, six fingers, patreon logo",
+    negative_prompt: str = DEFAULT_NEGATIVE_PROMPT_FOR_RUN,
     num_inference_steps: int = 28,
     guidance_scale: float = 7.5,
     width: int = 1024,
@@ -532,7 +534,7 @@ def generate_images(
     num_images: int = 1,
     webhook_url: str = "",
     output_dir: str = "./generated-images",
-    negative_prompt: str = "blurry, low quality, distorted, watermark, text, patreon logo",
+    negative_prompt: str = DEFAULT_NEGATIVE_PROMPT,
     num_inference_steps: int = 28,
     guidance_scale: float = 7.5,
     width: int = 1024,

@@ -13,6 +13,7 @@ from uuid import uuid4
 import requests
 
 from generator import HeartsyncModel
+from prompts import DEFAULT_NEGATIVE_PROMPT
 
 
 def _extract_parameters(parameter_blob: Any | None) -> dict[str, Any]:
@@ -154,7 +155,7 @@ def process_queued_runs() -> None:
             width = int(parameters.get("width", 1024))
             height = int(parameters.get("height", 1024))
             negative_prompt = parameters.get(
-                "negative_prompt", "blurry, low quality, distorted, watermark, text, patreon logo"
+                "negative_prompt", DEFAULT_NEGATIVE_PROMPT
             )
             num_inference_steps = int(parameters.get("steps", 28))
             guidance_scale = float(parameters.get("guidance", 7.5))
