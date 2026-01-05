@@ -193,6 +193,70 @@ def list_runs(
     )
 
 
+@router.get("/images", response_model=RunImageList)
+def list_run_images(
+    status_filter: RunImageStatus | None = Query(default=None, alias="status"),
+    scheduled_only: bool = Query(default=False, description="Only return images with scheduled_time set"),
+    limit: int = Query(default=48, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    session: Session = Depends(get_session),
+) -> RunImageList:
+    """
+    List run images with optional status filter and pagination.
+
+    Default ordering: newest first (created_at desc).
+    If scheduled_only=True, orders by scheduled_time asc (earliest first).
+    When scheduled_only=True, excludes POSTED images even if they have scheduled_time.
+    """
+    count_stmt = select(func.count()).select_from(RunImage)
+    if status_filter:
+        count_stmt = count_stmt.where(RunImage.status == status_filter)
+    if scheduled_only:
+        count_stmt = count_stmt.where(
+            RunImage.scheduled_time.is_not(None),
+            RunImage.status != RunImageStatus.POSTED
+        )
+    total = int(session.execute(count_stmt).scalar_one() or 0)
+
+    stmt = (
+        select(RunImage)
+        .options(selectinload(RunImage.run))
+        .limit(limit)
+        .offset(offset)
+    )
+    if scheduled_only:
+        stmt = stmt.where(
+            RunImage.scheduled_time.is_not(None),
+            RunImage.status != RunImageStatus.POSTED
+        ).order_by(RunImage.scheduled_time.asc())
+    else:
+        stmt = stmt.order_by(RunImage.created_at.desc())
+    if status_filter:
+        stmt = stmt.where(RunImage.status == status_filter)
+
+    images = session.execute(stmt).scalars().all()
+    items: list[RunImageListItem] = []
+    for img in images:
+        items.append(
+            RunImageListItem(
+                id=img.id,
+                run_id=img.run_id,
+                ordinal=img.ordinal,
+                asset_uri=img.asset_uri,
+                thumb_uri=img.thumb_uri,
+                generated_by_machine_id=img.generated_by_machine_id,
+                status=img.status,
+                notes=img.notes,
+                created_at=img.created_at,
+                run_created_at=(img.run.created_at if img.run else None),
+                prompt=(img.run.prompt if img.run else None),
+                scheduled_time=img.scheduled_time,
+            )
+        )
+
+    return RunImageList(images=items, total=total, limit=limit, offset=offset)
+
+
 @router.get("/{run_id}", response_model=RunRead)
 def get_run(run_id: str, session: Session = Depends(get_session)) -> Run:
     return _get_run(session, run_id)
@@ -348,52 +412,3 @@ def reject_run_image(
         "status": image.status.value,
         "message": "Image rejected successfully"
     }
-
-
-@router.get("/images", response_model=RunImageList)
-def list_run_images(
-    status_filter: RunImageStatus | None = Query(default=None, alias="status"),
-    limit: int = Query(default=48, ge=1, le=200),
-    offset: int = Query(default=0, ge=0),
-    session: Session = Depends(get_session),
-) -> RunImageList:
-    """
-    List run images with optional status filter and pagination.
-
-    Default ordering: newest first (created_at desc).
-    """
-    count_stmt = select(func.count()).select_from(RunImage)
-    if status_filter:
-        count_stmt = count_stmt.where(RunImage.status == status_filter)
-    total = int(session.execute(count_stmt).scalar_one() or 0)
-
-    stmt = (
-        select(RunImage)
-        .options(selectinload(RunImage.run))
-        .order_by(RunImage.created_at.desc())
-        .limit(limit)
-        .offset(offset)
-    )
-    if status_filter:
-        stmt = stmt.where(RunImage.status == status_filter)
-
-    images = session.execute(stmt).scalars().all()
-    items: list[RunImageListItem] = []
-    for img in images:
-        items.append(
-            RunImageListItem(
-                id=img.id,
-                run_id=img.run_id,
-                ordinal=img.ordinal,
-                asset_uri=img.asset_uri,
-                thumb_uri=img.thumb_uri,
-                generated_by_machine_id=img.generated_by_machine_id,
-                status=img.status,
-                notes=img.notes,
-                created_at=img.created_at,
-                run_created_at=(img.run.created_at if img.run else None),
-                prompt=(img.run.prompt if img.run else None),
-            )
-        )
-
-    return RunImageList(images=items, total=total, limit=limit, offset=offset)

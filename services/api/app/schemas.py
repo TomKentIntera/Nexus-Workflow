@@ -136,6 +136,7 @@ class RunImageListItem(BaseModel):
     created_at: datetime
     run_created_at: Optional[datetime] = None
     prompt: Optional[str] = None
+    scheduled_time: Optional[datetime] = None
 
 
 class RunImageList(BaseModel):

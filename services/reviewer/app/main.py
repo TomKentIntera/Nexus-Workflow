@@ -4,7 +4,7 @@ from typing import Dict, List, Optional
 import os
 
 import httpx
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -171,12 +171,20 @@ async def images_last_hour_by_machine() -> Dict:
 
 
 @app.get("/api/run-images", tags=["api"])
-async def list_run_images(status: str | None = None, limit: int = 48, offset: int = 0) -> Dict:
+async def list_run_images(
+    status: str | None = Query(default=None), 
+    scheduled_only: bool = Query(default=False), 
+    limit: int = Query(default=48), 
+    offset: int = Query(default=0)
+) -> Dict:
     """Proxy run image listing endpoint from API service."""
     try:
         params: dict[str, object] = {"limit": limit, "offset": offset}
         if status:
             params["status"] = status
+        # Pass scheduled_only - FastAPI expects lowercase "true" for boolean query params
+        if scheduled_only:
+            params["scheduled_only"] = "true"
         async with _api_client() as client:
             response = await client.get("/runs/images", params=params)
             response.raise_for_status()
