@@ -218,6 +218,17 @@ services:
       - minio
       - mysql
 
+  portainer:
+    image: portainer/portainer-ce:latest
+    restart: unless-stopped
+    ports:
+      - "9002:9000"  # HTTP UI
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - portainer_data:/data
+    networks:
+      - workflow_stack
+
 networks:
   workflow_stack:
     driver: bridge
@@ -232,4 +243,6 @@ volumes:
   image_generator_cache:
     driver: local
   image_generator_output:
+    driver: local
+  portainer_data:
     driver: local

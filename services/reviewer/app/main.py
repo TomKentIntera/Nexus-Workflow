@@ -89,7 +89,7 @@ def _api_client() -> httpx.AsyncClient:
 
 
 @app.get("/api/runs", tags=["api"])
-async def get_runs() -> Dict[str, List[Dict]]:
+async def get_runs() -> Dict:
     """Get all runs."""
     try:
         async with _api_client() as client:
