@@ -289,6 +289,60 @@ async def delete_banned_tag(tag: str) -> List[str]:
         raise HTTPException(status_code=502, detail=f"Failed to delete banned tag: {exc}")
 
 
+@app.get("/api/allowed-search-tags", tags=["api"])
+async def list_allowed_search_tags() -> List[Dict]:
+    """Proxy allowed-search-tags list from API service."""
+    try:
+        async with _api_client() as client:
+            response = await client.get("/allowed-search-tags")
+            response.raise_for_status()
+            data = response.json()
+            return data if isinstance(data, list) else []
+    except httpx.ConnectError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Cannot connect to API service at {settings.api_base_url}. Is the API service running?",
+        )
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to fetch allowed search tags: {exc}")
+
+
+@app.post("/api/allowed-search-tags", tags=["api"])
+async def add_allowed_search_tags(payload: Dict) -> List[Dict]:
+    """Proxy add-allowed-search-tags to API service."""
+    try:
+        async with _api_client() as client:
+            response = await client.post("/allowed-search-tags", json=payload)
+            response.raise_for_status()
+            data = response.json()
+            return data if isinstance(data, list) else []
+    except httpx.ConnectError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Cannot connect to API service at {settings.api_base_url}. Is the API service running?",
+        )
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to add allowed search tags: {exc}")
+
+
+@app.delete("/api/allowed-search-tags/{tag_type}/{tag}", tags=["api"])
+async def delete_allowed_search_tag(tag_type: str, tag: str) -> List[Dict]:
+    """Proxy delete-allowed-search-tag to API service."""
+    try:
+        async with _api_client() as client:
+            response = await client.delete(f"/allowed-search-tags/{tag_type}/{tag}")
+            response.raise_for_status()
+            data = response.json()
+            return data if isinstance(data, list) else []
+    except httpx.ConnectError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Cannot connect to API service at {settings.api_base_url}. Is the API service running?",
+        )
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to delete allowed search tag: {exc}")
+
+
 @app.get("/", response_class=HTMLResponse)
 async def index():
     """Serve the reviewer UI."""

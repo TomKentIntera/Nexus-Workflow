@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from enum import Enum
 from typing import Any, List, Optional
 
 from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field
@@ -152,3 +153,37 @@ class BannedTagsUpsert(BaseModel):
     """
 
     tags: List[str] = Field(default_factory=list, description="Tags to add to the banned list")
+
+
+class AllowedSearchTagType(str, Enum):
+    SERIES = "series"
+    CHARACTER = "character"
+
+
+class AllowedSearchTagItem(BaseModel):
+    """
+    A single allowed search tag entry.
+    """
+
+    type: AllowedSearchTagType = Field(
+        ...,
+        description='Tag namespace/type (usually "series" or "character")',
+    )
+    tag: str = Field(..., description="The tag value, e.g. series or character name")
+
+
+class AllowedSearchTagsUpsert(BaseModel):
+    """
+    Add allowed search tags (idempotent).
+    """
+
+    tags: List[AllowedSearchTagItem] = Field(
+        default_factory=list, description="Allowed search tags to add"
+    )
+
+
+class AllowedSearchTagRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    type: str
+    tag: str

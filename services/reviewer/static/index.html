@@ -323,6 +323,7 @@
             <button id="navPosted" onclick="navigate('posted')">Posted</button>
             <button id="navStats" onclick="navigate('stats')">Stats</button>
             <button id="navBanned" onclick="navigate('banned')">Banned Tags</button>
+            <button id="navAllowed" onclick="navigate('allowed')">Allowed Search Tags</button>
         </div>
 
         <div id="pageHome" class="page">
@@ -448,6 +449,28 @@
             </div>
         </div>
 
+        <div id="pageAllowed" class="page">
+            <div class="stats">
+                <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
+                    <div style="font-weight:600;">Allowed search tags</div>
+                    <button onclick="loadAllowedSearchTags()">Refresh</button>
+                    <span class="muted" id="allowedCount"></span>
+                </div>
+                <div class="inline-actions">
+                    <select id="allowedTypeSelect" style="min-width:200px; flex: unset;">
+                        <option value="series" selected>series</option>
+                        <option value="character">character</option>
+                    </select>
+                    <input id="allowedTagInput" placeholder="e.g. One Piece" />
+                    <button onclick="addAllowedSearchTag()">Add allowed tag</button>
+                </div>
+                <div id="allowedTagsTableWrap"></div>
+                <div class="muted" style="margin-top:10px;">
+                    These tags are used as the basis for “post search” / generation targeting.
+                </div>
+            </div>
+        </div>
+
         <div id="status" class="status"></div>
         <div id="loading" class="loading" style="display: none;">Loading...</div>
     </div>
@@ -467,7 +490,7 @@
         }
 
         function setActivePage(page) {
-            const pages = ['home', 'review', 'scheduled', 'posted', 'stats', 'banned'];
+            const pages = ['home', 'review', 'scheduled', 'posted', 'stats', 'banned', 'allowed'];
             pages.forEach(p => {
                 document.getElementById(`page${p.charAt(0).toUpperCase() + p.slice(1)}`).classList.toggle('active', p === page);
                 document.getElementById(`nav${p.charAt(0).toUpperCase() + p.slice(1)}`).classList.toggle('active', p === page);
@@ -481,12 +504,13 @@
             if (page === 'posted') refreshPosted();
             if (page === 'stats') loadLastHourStats();
             if (page === 'banned') loadBannedTags();
+            if (page === 'allowed') loadAllowedSearchTags();
         }
 
         function onRoute() {
             const hash = (location.hash || '#/home').replace(/^#\/?/, '');
             const page = (hash.split('/')[0] || 'home').trim();
-            if (!['home', 'review', 'scheduled', 'posted', 'stats', 'banned'].includes(page)) {
+            if (!['home', 'review', 'scheduled', 'posted', 'stats', 'banned', 'allowed'].includes(page)) {
                 setActivePage('home');
             } else {
                 setActivePage(page);
@@ -682,6 +706,95 @@
                 loadBannedTags();
             } catch (e) {
                 showStatus('Error removing banned tag: ' + e.message, 'error');
+            }
+        }
+
+        async function loadAllowedSearchTags() {
+            const wrap = document.getElementById('allowedTagsTableWrap');
+            const countEl = document.getElementById('allowedCount');
+            wrap.innerHTML = 'Loading...';
+            countEl.textContent = '';
+            try {
+                const res = await fetch('/api/allowed-search-tags');
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const rowsRaw = await res.json();
+                const rows = (Array.isArray(rowsRaw) ? rowsRaw : [])
+                    .map(x => ({ type: String(x?.type ?? ''), tag: String(x?.tag ?? '') }))
+                    .filter(x => x.type.trim() && x.tag.trim())
+                    .sort((a, b) => (a.type === b.type ? a.tag.localeCompare(b.tag) : a.type.localeCompare(b.type)));
+
+                countEl.textContent = `Count: ${rows.length}`;
+                if (!rows.length) {
+                    wrap.innerHTML = '<div style="margin-top:12px; color:#666;">No allowed search tags yet.</div>';
+                    return;
+                }
+
+                let html = '<table><thead><tr><th style="width:180px;">Type</th><th>Tag</th><th style="width:140px;">Action</th></tr></thead><tbody>';
+                rows.forEach(row => {
+                    html += `<tr>
+                        <td>${escapeHtml(row.type)}</td>
+                        <td>${escapeHtml(row.tag)}</td>
+                        <td>
+                            <button class="danger" data-type="${escapeHtml(row.type)}" data-tag="${escapeHtml(row.tag)}">Remove</button>
+                        </td>
+                    </tr>`;
+                });
+                html += '</tbody></table>';
+                wrap.innerHTML = html;
+
+                wrap.querySelectorAll('button[data-type][data-tag]').forEach(btn => {
+                    btn.addEventListener('click', () => removeAllowedSearchTag(btn.getAttribute('data-type'), btn.getAttribute('data-tag')));
+                });
+            } catch (e) {
+                wrap.innerHTML = `<div style="margin-top:12px; color:#b02a37;">Error loading allowed search tags: ${e.message}</div>`;
+            }
+        }
+
+        async function addAllowedSearchTag() {
+            const typeSel = document.getElementById('allowedTypeSelect');
+            const input = document.getElementById('allowedTagInput');
+            const type = (typeSel.value || '').trim();
+            const tag = (input.value || '').trim();
+            if (!type) {
+                showStatus('Please select a type', 'error');
+                return;
+            }
+            if (!tag) {
+                showStatus('Please enter a tag', 'error');
+                return;
+            }
+            try {
+                const res = await fetch('/api/allowed-search-tags', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ tags: [{ type, tag }] })
+                });
+                if (!res.ok) {
+                    const text = await res.text();
+                    throw new Error(text || `HTTP ${res.status}`);
+                }
+                input.value = '';
+                showStatus(`Allowed search tag added: ${type} / ${tag}`, 'success');
+                loadAllowedSearchTags();
+            } catch (e) {
+                showStatus('Error adding allowed search tag: ' + e.message, 'error');
+            }
+        }
+
+        async function removeAllowedSearchTag(type, tag) {
+            const t = (type || '').trim();
+            const v = (tag || '').trim();
+            if (!t || !v) return;
+            try {
+                const res = await fetch(`/api/allowed-search-tags/${encodeURIComponent(t)}/${encodeURIComponent(v)}`, { method: 'DELETE' });
+                if (!res.ok) {
+                    const text = await res.text();
+                    throw new Error(text || `HTTP ${res.status}`);
+                }
+                showStatus(`Removed allowed search tag: ${t} / ${v}`, 'success');
+                loadAllowedSearchTags();
+            } catch (e) {
+                showStatus('Error removing allowed search tag: ' + e.message, 'error');
             }
         }
 
@@ -1188,6 +1301,9 @@
         });
         document.getElementById('bannedTagInput').addEventListener('keydown', (e) => {
             if (e.key === 'Enter') addBannedTag();
+        });
+        document.getElementById('allowedTagInput').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') addAllowedSearchTag();
         });
         window.addEventListener('hashchange', onRoute);
         onRoute();
