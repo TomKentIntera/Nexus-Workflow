@@ -13,6 +13,7 @@ from ..database import get_session
 from ..models import Run, RunImage, RunImageApproval, RunImageStatus, RunStatus
 from ..schemas import (
     RunCreate,
+    RunGenerateMoreImages,
     RunImageApprovalRequest,
     RunImageApprovalResponse,
     RunImageCreate,
@@ -273,6 +274,40 @@ def update_run_status(
     run.updated_at = datetime.utcnow()
     if payload.status in (RunStatus.READY, RunStatus.ERROR, RunStatus.APPROVED, RunStatus.POSTED):
         run.leased_until = None
+    session.add(run)
+    session.commit()
+    session.refresh(run)
+    return run
+
+
+@router.post("/{run_id}/generate-more", response_model=RunRead)
+def generate_more_images(
+    run_id: str,
+    payload: RunGenerateMoreImages,
+    session: Session = Depends(get_session),
+) -> Run:
+    """
+    Queue a run to generate additional images.
+    Sets status to QUEUED and increases max_images by the specified amount.
+    """
+    run = _get_run(session, run_id)
+    
+    # Get current image count from parameter_blob
+    current_count = _extract_image_count(run.parameter_blob)
+    new_count = current_count + payload.additional_count
+    
+    # Update parameter_blob with new image_count
+    if isinstance(run.parameter_blob, dict):
+        run.parameter_blob = {**run.parameter_blob, "image_count": new_count}
+    else:
+        # If parameter_blob is None or not a dict, create a new dict
+        run.parameter_blob = {"image_count": new_count}
+    
+    # Set status to QUEUED and clear lease
+    run.status = RunStatus.QUEUED
+    run.leased_until = None
+    run.updated_at = datetime.utcnow()
+    
     session.add(run)
     session.commit()
     session.refresh(run)

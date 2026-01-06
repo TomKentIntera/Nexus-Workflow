@@ -27,6 +27,7 @@ class RunImageRead(BaseModel):
     generated_by_machine_id: Optional[str] = None
     status: RunImageStatus
     notes: Optional[str] = None
+    fanvue_uuid: Optional[str] = None
     created_at: datetime
 
 
@@ -43,6 +44,11 @@ class RunCreate(RunBase):
 
 class RunUpdateStatus(BaseModel):
     status: RunStatus
+
+
+class RunGenerateMoreImages(BaseModel):
+    """Request to generate additional images for a run."""
+    additional_count: int = Field(default=10, ge=1, description="Number of additional images to generate")
 
 
 class RunRead(RunBase):
@@ -134,6 +140,7 @@ class RunImageListItem(BaseModel):
     generated_by_machine_id: Optional[str] = None
     status: RunImageStatus
     notes: Optional[str] = None
+    fanvue_uuid: Optional[str] = None
     created_at: datetime
     run_created_at: Optional[datetime] = None
     prompt: Optional[str] = None

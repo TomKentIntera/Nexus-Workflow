@@ -116,6 +116,42 @@
         }
         .run-info h2 { margin-bottom: 8px; color: #333; }
         .run-info p { color: #666; margin: 4px 0; }
+        .run-info-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 16px;
+            margin-top: 12px;
+        }
+        .run-info-item {
+            display: flex;
+            flex-direction: column;
+        }
+        .run-info-item .label {
+            font-size: 12px;
+            color: #6c757d;
+            text-transform: uppercase;
+            letter-spacing: .06em;
+            margin-bottom: 4px;
+        }
+        .run-info-item .value {
+            font-size: 14px;
+            color: #212529;
+            font-weight: 500;
+        }
+        .run-info-item .value-wrapper {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .generate-more-link {
+            font-size: 12px;
+            color: #17a2b8;
+            text-decoration: none;
+            cursor: pointer;
+        }
+        .generate-more-link:hover {
+            text-decoration: underline;
+        }
         .gallery {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
@@ -372,10 +408,24 @@
             <div id="runInfo" style="display: none;">
                 <div class="run-info">
                     <h2 id="runId"></h2>
-                    <p><strong>Prompt:</strong></p>
                     <div id="runPromptTags" class="tag-pills"></div>
-                    <p style="margin-top: 12px;"><strong>Status:</strong> <span id="runStatus"></span></p>
-                    <p><strong>Images:</strong> <span id="imageCount"></span></p>
+                    <div class="run-info-row">
+                        <div class="run-info-item">
+                            <div class="label">Status</div>
+                            <div class="value" id="runStatus"></div>
+                        </div>
+                        <div class="run-info-item">
+                            <div class="label">Images</div>
+                            <div class="value-wrapper">
+                                <span id="imageCount"></span>
+                                <a id="generateMoreLink" class="generate-more-link" onclick="generateMoreImages(); return false;">Generate More</a>
+                            </div>
+                        </div>
+                        <div class="run-info-item">
+                            <div class="label">Created</div>
+                            <div class="value" id="runCreated"></div>
+                        </div>
+                    </div>
                 </div>
                 <div class="gallery" id="gallery"></div>
             </div>
@@ -420,7 +470,7 @@
         <div id="pageStats" class="page">
             <div class="stats">
                 <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
-                    <div style="font-weight:600;">Images generated in the last hour by machine</div>
+                    <div style="font-weight:600;">Images generated per hour over the last 24 hours</div>
                     <button onclick="loadLastHourStats()">Refresh</button>
                     <span class="muted" id="statsTotal"></span>
                 </div>
@@ -537,36 +587,55 @@
             wrap.innerHTML = 'Loading stats...';
             totalEl.textContent = '';
             try {
-                const response = await fetch(`/api/stats/images-last-hour-by-machine`);
+                const response = await fetch(`/api/stats/images-per-hour?hours=24`);
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 const payload = await response.json();
-                const rows = payload.data || [];
-                const total = payload.total || 0;
-                totalEl.textContent = `Total: ${total}`;
+                const data = payload.data || [];
+                const hours = payload.hours || [];
+                const machines = payload.machines || [];
 
-                if (!rows.length) {
-                    wrap.innerHTML = '<div style="margin-top:12px; color:#666;">No images generated in the last hour.</div>';
-                    drawBarChart([], []);
+                // Aggregate total images per hour
+                const hourlyTotals = {};
+                hours.forEach(h => hourlyTotals[h] = 0);
+                data.forEach(d => {
+                    if (hourlyTotals.hasOwnProperty(d.hour)) {
+                        hourlyTotals[d.hour] += d.count || 0;
+                    }
+                });
+
+                const total = Object.values(hourlyTotals).reduce((sum, count) => sum + count, 0);
+                totalEl.textContent = `Total: ${total} images in last 24 hours`;
+
+                if (!hours.length) {
+                    wrap.innerHTML = '<div style="margin-top:12px; color:#666;">No images generated in the last 24 hours.</div>';
+                    drawLineChart([], []);
                     return;
                 }
 
-                let html = '<table><thead><tr><th>Machine</th><th>Count</th></tr></thead><tbody>';
-                rows.forEach(r => {
-                    html += `<tr><td>${escapeHtml(r.machine_id ?? 'unknown')}</td><td>${r.count ?? 0}</td></tr>`;
+                // Create table showing hourly totals
+                let html = '<table><thead><tr><th>Hour (UTC)</th><th>Total Images</th></tr></thead><tbody>';
+                hours.forEach(hour => {
+                    const count = hourlyTotals[hour] || 0;
+                    html += `<tr><td>${escapeHtml(hour)}</td><td>${count}</td></tr>`;
                 });
                 html += '</tbody></table>';
                 wrap.innerHTML = html;
 
-                const labels = rows.map(r => (r.machine_id ?? 'unknown').toString());
-                const values = rows.map(r => Number(r.count ?? 0));
-                drawBarChart(labels, values);
+                // Format hour labels for display (show just the time part)
+                const labels = hours.map(h => {
+                    // h is in format "YYYY-MM-DD HH:00:00", extract just "HH:00"
+                    const match = h.match(/(\d{2}):00:00$/);
+                    return match ? match[1] + ':00' : h;
+                });
+                const values = hours.map(h => hourlyTotals[h] || 0);
+                drawLineChart(labels, values);
             } catch (error) {
                 wrap.innerHTML = `<div style="margin-top:12px; color:#b02a37;">Error loading stats: ${error.message}</div>`;
-                drawBarChart([], []);
+                drawLineChart([], []);
             }
         }
 
-        function drawBarChart(labels, values) {
+        function drawLineChart(labels, values) {
             const canvas = document.getElementById('statsChart');
             const ctx = canvas.getContext('2d');
             if (!ctx) return;
@@ -588,7 +657,7 @@
             ctx.lineTo(padding.left + w, padding.top + h);
             ctx.stroke();
 
-            if (!labels.length) {
+            if (!labels.length || !values.length) {
                 ctx.fillStyle = '#6c757d';
                 ctx.font = '14px system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
                 ctx.fillText('No data', padding.left + 10, padding.top + 24);
@@ -596,35 +665,77 @@
             }
 
             const maxVal = Math.max(1, ...values);
-            const barGap = 10;
-            const barW = Math.max(8, Math.floor((w - barGap * (labels.length - 1)) / labels.length));
-            const scaleY = h / maxVal;
+            const minVal = 0;
+            const range = maxVal - minVal || 1;
+            const scaleY = h / range;
+            const stepX = labels.length > 1 ? w / (labels.length - 1) : 0;
 
-            // Bars
+            // Draw grid lines
+            ctx.strokeStyle = '#f0f0f0';
+            ctx.lineWidth = 0.5;
+            const gridLines = 5;
+            for (let i = 0; i <= gridLines; i++) {
+                const y = padding.top + (h / gridLines) * i;
+                ctx.beginPath();
+                ctx.moveTo(padding.left, y);
+                ctx.lineTo(padding.left + w, y);
+                ctx.stroke();
+            }
+
+            // Draw the line
+            ctx.strokeStyle = '#0d6efd';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
             labels.forEach((label, i) => {
                 const v = values[i] || 0;
-                const barH = Math.round(v * scaleY);
-                const x = padding.left + i * (barW + barGap);
-                const y = padding.top + h - barH;
+                const x = padding.left + i * stepX;
+                const y = padding.top + h - (v - minVal) * scaleY;
+                if (i === 0) {
+                    ctx.moveTo(x, y);
+                } else {
+                    ctx.lineTo(x, y);
+                }
+            });
+            ctx.stroke();
 
+            // Draw points and value labels
+            labels.forEach((label, i) => {
+                const v = values[i] || 0;
+                const x = padding.left + i * stepX;
+                const y = padding.top + h - (v - minVal) * scaleY;
+
+                // Draw point
                 ctx.fillStyle = '#0d6efd';
-                ctx.fillRect(x, y, barW, barH);
+                ctx.beginPath();
+                ctx.arc(x, y, 4, 0, Math.PI * 2);
+                ctx.fill();
 
-                // value label
+                // Draw value label above point
                 ctx.fillStyle = '#212529';
-                ctx.font = '12px system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
+                ctx.font = '11px system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
                 ctx.textAlign = 'center';
-                ctx.fillText(String(v), x + barW / 2, y - 6);
+                ctx.fillText(String(v), x, y - 10);
 
-                // x label (rotated)
+                // Draw x-axis label (rotated)
                 ctx.save();
-                ctx.translate(x + barW / 2, padding.top + h + 10);
-                ctx.rotate(-Math.PI / 5);
+                ctx.translate(x, padding.top + h + 15);
+                ctx.rotate(-Math.PI / 4);
                 ctx.fillStyle = '#495057';
                 ctx.textAlign = 'right';
+                ctx.font = '10px system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
                 ctx.fillText(label, 0, 0);
                 ctx.restore();
             });
+
+            // Y-axis labels
+            ctx.fillStyle = '#495057';
+            ctx.font = '11px system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
+            ctx.textAlign = 'right';
+            for (let i = 0; i <= gridLines; i++) {
+                const value = minVal + (range / gridLines) * (gridLines - i);
+                const y = padding.top + (h / gridLines) * i;
+                ctx.fillText(Math.round(value).toString(), padding.left - 10, y + 4);
+            }
         }
 
         async function loadBannedTags() {
@@ -920,6 +1031,26 @@
                 document.getElementById('runStatus').textContent = run.status;
                 document.getElementById('imageCount').textContent = run.images.length;
                 
+                // Format and display creation date
+                let createdDateStr = '—';
+                if (run.created_at) {
+                    const date = new Date(run.created_at);
+                    createdDateStr = date.toLocaleDateString('en-US', { 
+                        month: 'short', 
+                        day: 'numeric', 
+                        year: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit'
+                    });
+                }
+                document.getElementById('runCreated').textContent = createdDateStr;
+                
+                // Show Generate More link for all runs
+                const generateLink = document.getElementById('generateMoreLink');
+                if (generateLink) {
+                    generateLink.style.display = 'inline';
+                }
+                
                 const gallery = document.getElementById('gallery');
                 gallery.innerHTML = '';
                 imageMap = {};
@@ -1056,6 +1187,39 @@
 
         function refreshRuns() {
             fetchRuns();
+        }
+
+        async function generateMoreImages() {
+            if (!currentRunId) {
+                showStatus('Please select a run first', 'error');
+                return;
+            }
+            
+            if (!confirm('This will set the run to QUEUED status and add 10 more images to generate. Continue?')) {
+                return;
+            }
+            
+            try {
+                const response = await fetch(`/api/runs/${currentRunId}/generate-more`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ additional_count: 10 })
+                });
+                
+                if (!response.ok) {
+                    const text = await response.text();
+                    throw new Error(text || `HTTP ${response.status}`);
+                }
+                
+                const result = await response.json();
+                showStatus('✓ Successfully queued run for 10 more images. Status updated to QUEUED.', 'success');
+                // Reload the run to show updated status
+                loadRun(currentRunId);
+                // Refresh runs list to show updated status
+                fetchRuns();
+            } catch (error) {
+                showStatus('Error generating more images: ' + error.message, 'error');
+            }
         }
 
         async function refreshPosted() {

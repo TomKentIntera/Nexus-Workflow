@@ -1,4 +1,4 @@
-FROM nvidia/cuda:12.1.0-cudnn8-runtime-ubuntu22.04
+FROM nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -57,9 +57,10 @@ RUN pip install --no-cache-dir \
 COPY services/image-generator/requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r /app/requirements.txt
 
-# Copy the generator module, database module, and worker
+# Copy the generator module, database module, prompts, and worker
 COPY services/image-generator/generator.py /app/generator.py
 COPY services/image-generator/db.py /app/db.py
+COPY services/image-generator/prompts.py /app/prompts.py
 COPY services/image-generator/worker.py /app/worker.py
 
 # Copy the logo file

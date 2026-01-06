@@ -238,6 +238,26 @@ async def reject_image(run_id: str, image_id: str) -> Dict:
         raise HTTPException(status_code=502, detail=f"Failed to reject image: {exc}")
 
 
+@app.post("/api/runs/{run_id}/generate-more", tags=["api"])
+async def generate_more_images(run_id: str, payload: Dict) -> Dict:
+    """Generate more images for a run."""
+    try:
+        async with _api_client() as client:
+            response = await client.post(
+                f"/runs/{run_id}/generate-more",
+                json=payload,
+            )
+            response.raise_for_status()
+            return response.json()
+    except httpx.ConnectError as exc:
+        raise HTTPException(
+            status_code=503, 
+            detail=f"Cannot connect to API service at {settings.api_base_url}. Is the API service running?"
+        )
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to generate more images: {exc}")
+
+
 @app.get("/api/banned-tags", tags=["api"])
 async def list_banned_tags() -> List[str]:
     """Proxy banned-tags list from API service."""

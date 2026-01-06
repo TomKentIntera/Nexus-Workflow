@@ -21,6 +21,8 @@ services:
       N8N_LISTEN_ADDRESS: "0.0.0.0"
       N8N_TUNNEL_SUBDOMAIN: ""
       WEBHOOK_URL: "http://localhost:5678/"
+      # OAuth encryption key (must match the key in /home/node/.n8n/config)
+      N8N_ENCRYPTION_KEY: "pXxx6UsRFXfc13RmQxe7OxqN2NaKLJ7w"
       GENERIC_TIMEZONE: "UTC"
       API_BASE_URL: "http://api:8000"
       PYTHON_BIN: "/usr/local/bin/python"
@@ -199,6 +201,7 @@ services:
       # Mount Python files for development (changes without rebuild)
       - ./services/image-generator/generator.py:/app/generator.py
       - ./services/image-generator/db.py:/app/db.py
+      - ./services/image-generator/prompts.py:/app/prompts.py
       - ./services/image-generator/worker.py:/app/worker.py
       # Mount logo file for development
       - ./patreon_logo.png:/app/patreon_logo.png:ro
