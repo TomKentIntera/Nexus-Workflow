@@ -4,11 +4,12 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
 from ..database import get_session
 from ..models import Run, RunImage, RunImageStatus, RunStatus
+from ..services.artist_scores import compute_artist_scores_from_runs
 
 router = APIRouter(prefix="/stats", tags=["stats"])
 
@@ -117,4 +118,61 @@ def images_last_hour_by_machine(session: Session = Depends(get_session)) -> dict
     data = [{"machine_id": (r.machine_id or "unknown"), "count": int(r.count)} for r in rows]
     total = sum(d["count"] for d in data)
     return {"data": data, "total": int(total)}
+
+
+@router.get("/artist-scores")
+def artist_scores(
+    limit: int = Query(default=50, ge=1, le=500, description="Max artists to return"),
+    min_posts: int = Query(default=1, ge=1, le=1000000, description="Minimum number of posts required"),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    """
+    Rank artists based on run outcomes, normalized by number of posts with that artist tag.
+
+    Normalization:
+      score = (approvals - rejections) / posts
+
+    Where:
+    - approvals: number of APPROVED or POSTED images across runs containing that artist tag
+    - rejections: number of REJECTED images across runs containing that artist tag
+    - posts: number of runs containing that artist tag (case-insensitive)
+    """
+    pos_case = case((RunImage.status.in_([RunImageStatus.APPROVED, RunImageStatus.POSTED]), 1), else_=0)
+    neg_case = case((RunImage.status == RunImageStatus.REJECTED, 1), else_=0)
+
+    # One row per run: includes parameter_blob (for artist tags) plus outcome counts.
+    stmt = (
+        select(
+            Run.parameter_blob,
+            func.coalesce(func.sum(pos_case), 0).label("approvals"),
+            func.coalesce(func.sum(neg_case), 0).label("rejections"),
+        )
+        .select_from(Run)
+        .join(RunImage, RunImage.run_id == Run.id, isouter=True)
+        # Ignore deleted/posted runs at the run level only for workflow UI; for scoring we
+        # still want them included. So we intentionally do NOT filter by Run.status here.
+        .group_by(Run.id)
+    )
+
+    rows = session.execute(stmt).all()
+    # compute_artist_scores_from_runs expects (parameter_blob, approvals, rejections)
+    scored = compute_artist_scores_from_runs(((r.parameter_blob, int(r.approvals), int(r.rejections)) for r in rows))
+    filtered = [r for r in scored if r.posts >= min_posts]
+    filtered = filtered[:limit]
+
+    return {
+        "data": [
+            {
+                "artist": r.artist,
+                "score": r.score,
+                "posts": r.posts,
+                "approvals": r.approvals,
+                "rejections": r.rejections,
+                "delta": r.delta,
+            }
+            for r in filtered
+        ],
+        "limit": limit,
+        "min_posts": min_posts,
+    }
 
