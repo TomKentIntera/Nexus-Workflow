@@ -345,12 +345,68 @@
         .tag-pill .ban-btn i {
             font-size: 12px;
         }
+        .tag-pill .pill-remove {
+            background: transparent;
+            border: none;
+            color: #6c757d;
+            cursor: pointer;
+            padding: 2px 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 4px;
+            transition: background-color 0.2s;
+        }
+        .tag-pill .pill-remove:hover {
+            background: #e9ecef;
+            color: #212529;
+        }
+        .suggest-wrap {
+            position: relative;
+            flex: 1;
+            min-width: 260px;
+        }
+        .suggest-list {
+            position: absolute;
+            top: calc(100% + 6px);
+            left: 0;
+            right: 0;
+            background: #fff;
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            box-shadow: 0 8px 22px rgba(0,0,0,0.08);
+            max-height: 260px;
+            overflow: auto;
+            z-index: 50;
+            display: none;
+        }
+        .suggest-list.active { display: block; }
+        .suggest-item {
+            padding: 10px 12px;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            gap: 10px;
+            border-bottom: 1px solid #f1f3f5;
+            font-size: 14px;
+        }
+        .suggest-item:last-child { border-bottom: none; }
+        .suggest-item:hover { background: #f8f9fa; }
+        .suggest-meta { color: #6c757d; font-size: 12px; white-space: nowrap; }
+        .two-col {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+        }
+        @media (max-width: 980px) {
+            .two-col { grid-template-columns: 1fr; }
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>Reviewer</h1>
-        <div class="subhead">Home, Review, Scheduled, Posted, and Stats</div>
+        <div class="subhead">Home, Review, Scheduled, Posted, Stats, and Manual Runs</div>
 
         <div class="nav">
             <button id="navHome" onclick="navigate('home')">Home</button>
@@ -360,6 +416,7 @@
             <button id="navStats" onclick="navigate('stats')">Stats</button>
             <button id="navBanned" onclick="navigate('banned')">Banned Tags</button>
             <button id="navAllowed" onclick="navigate('allowed')">Allowed Search Tags</button>
+            <button id="navManual" onclick="navigate('manual')">Manual Run</button>
         </div>
 
         <div id="pageHome" class="page">
@@ -521,6 +578,72 @@
             </div>
         </div>
 
+        <div id="pageManual" class="page">
+            <div class="stats">
+                <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
+                    <div style="font-weight:600;">Manual run submission</div>
+                    <button onclick="manualReset()" style="background:#6c757d;">Reset</button>
+                </div>
+                <div class="muted" style="margin-top:6px;">
+                    Add general tags + character tags (searched via Rule34 Nexus tag search). Stage picks a random matching post,
+                    extracts its general tags, removes common tags (1boy/1girl + hair/eyes tags), and builds a prompt.
+                </div>
+
+                <div class="two-col" style="margin-top:14px;">
+                    <div class="card">
+                        <div class="label">General tags</div>
+                        <div class="controls" style="margin:12px 0 0;">
+                            <div class="suggest-wrap">
+                                <input id="manualGeneralInput" placeholder="Search general tags (e.g. catgirl)" autocomplete="off" />
+                                <div id="manualGeneralSuggest" class="suggest-list"></div>
+                            </div>
+                            <button onclick="manualAddTyped('general')" style="background:#0d6efd;">Add</button>
+                        </div>
+                        <div id="manualGeneralPills" class="tag-pills"></div>
+                    </div>
+                    <div class="card">
+                        <div class="label">Character tags</div>
+                        <div class="controls" style="margin:12px 0 0;">
+                            <div class="suggest-wrap">
+                                <input id="manualCharacterInput" placeholder="Search characters (e.g. Frieren)" autocomplete="off" />
+                                <div id="manualCharacterSuggest" class="suggest-list"></div>
+                            </div>
+                            <button onclick="manualAddTyped('character')" style="background:#0d6efd;">Add</button>
+                        </div>
+                        <div id="manualCharacterPills" class="tag-pills"></div>
+                    </div>
+                </div>
+
+                <div class="inline-actions" style="margin-top:14px;">
+                    <label class="muted">Images:
+                        <input id="manualImageCount" type="number" min="1" max="50" value="10" style="min-width:120px; flex: unset;" />
+                    </label>
+                    <button id="manualStageBtn" onclick="manualStage()" style="background:#17a2b8;">Stage run</button>
+                </div>
+
+                <div id="manualStageWrap" style="display:none; margin-top:14px;">
+                    <div class="card">
+                        <div style="display:flex; gap:14px; align-items:flex-start; flex-wrap:wrap;">
+                            <div style="min-width:220px;">
+                                <div class="label">Picked post</div>
+                                <div class="muted" id="manualPickedPostMeta" style="margin-top:6px;"></div>
+                                <img id="manualPickedPostImg" src="" alt="Picked post preview" style="margin-top:10px; width:220px; border-radius:8px; border:1px solid #dee2e6; display:none;" />
+                            </div>
+                            <div style="flex:1; min-width:300px;">
+                                <div class="label">Final tags (submit uses this list)</div>
+                                <div class="muted" style="margin-top:6px;">You can remove any tag before submitting.</div>
+                                <div id="manualFinalPills" class="tag-pills" style="margin-top:10px;"></div>
+                                <div class="inline-actions" style="margin-top:12px;">
+                                    <button class="approve" id="manualSubmitBtn" onclick="manualSubmit()">Submit run</button>
+                                    <button onclick="navigate('review')" style="background:#6c757d;">Go to Review</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <div id="status" class="status"></div>
         <div id="loading" class="loading" style="display: none;">Loading...</div>
     </div>
@@ -540,7 +663,7 @@
         }
 
         function setActivePage(page) {
-            const pages = ['home', 'review', 'scheduled', 'posted', 'stats', 'banned', 'allowed'];
+            const pages = ['home', 'review', 'scheduled', 'posted', 'stats', 'banned', 'allowed', 'manual'];
             pages.forEach(p => {
                 document.getElementById(`page${p.charAt(0).toUpperCase() + p.slice(1)}`).classList.toggle('active', p === page);
                 document.getElementById(`nav${p.charAt(0).toUpperCase() + p.slice(1)}`).classList.toggle('active', p === page);
@@ -560,7 +683,7 @@
         function onRoute() {
             const hash = (location.hash || '#/home').replace(/^#\/?/, '');
             const page = (hash.split('/')[0] || 'home').trim();
-            if (!['home', 'review', 'scheduled', 'posted', 'stats', 'banned', 'allowed'].includes(page)) {
+            if (!['home', 'review', 'scheduled', 'posted', 'stats', 'banned', 'allowed', 'manual'].includes(page)) {
                 setActivePage('home');
             } else {
                 setActivePage(page);
@@ -916,6 +1039,228 @@
                 .replaceAll('>', '&gt;')
                 .replaceAll('"', '&quot;')
                 .replaceAll("'", '&#039;');
+        }
+
+        // --- Manual run submission ---
+        const manualState = {
+            generalTags: [],
+            characterTags: [],
+            finalTags: [],
+            seedPostId: null,
+        };
+        let manualGeneralTimer = null;
+        let manualCharacterTimer = null;
+
+        function manualNormalizeTag(raw) {
+            const s = String(raw || '').trim();
+            if (!s) return '';
+            // Rule34 tags commonly use underscores; normalize spaces.
+            return s.replaceAll(/\s+/g, '_');
+        }
+
+        function manualRenderPills(containerId, tags, removeFn) {
+            const el = document.getElementById(containerId);
+            if (!el) return;
+            el.innerHTML = '';
+            tags.forEach(tag => {
+                const pill = document.createElement('div');
+                pill.className = 'tag-pill';
+                pill.innerHTML = `
+                    <span class="tag-text">${escapeHtml(tag)}</span>
+                    <button class="pill-remove" title="Remove">
+                        <i class="fa-solid fa-xmark"></i>
+                    </button>
+                `;
+                const btn = pill.querySelector('.pill-remove');
+                btn.addEventListener('click', () => removeFn(tag));
+                el.appendChild(pill);
+            });
+        }
+
+        function manualAddTag(kind, tag) {
+            const t = manualNormalizeTag(tag);
+            if (!t) return;
+            const key = t.toLowerCase();
+            const list = (kind === 'character') ? manualState.characterTags : manualState.generalTags;
+            if (list.some(x => x.toLowerCase() === key)) return;
+            list.push(t);
+            manualRender();
+        }
+
+        function manualRemoveTag(kind, tag) {
+            const key = String(tag || '').toLowerCase();
+            const list = (kind === 'character') ? manualState.characterTags : manualState.generalTags;
+            const next = list.filter(x => x.toLowerCase() !== key);
+            if (kind === 'character') manualState.characterTags = next;
+            else manualState.generalTags = next;
+            manualRender();
+        }
+
+        function manualRemoveFinalTag(tag) {
+            const key = String(tag || '').toLowerCase();
+            manualState.finalTags = (manualState.finalTags || []).filter(x => x.toLowerCase() !== key);
+            manualRender();
+        }
+
+        function manualRender() {
+            manualRenderPills('manualGeneralPills', manualState.generalTags, (t) => manualRemoveTag('general', t));
+            manualRenderPills('manualCharacterPills', manualState.characterTags, (t) => manualRemoveTag('character', t));
+            manualRenderPills('manualFinalPills', manualState.finalTags, manualRemoveFinalTag);
+
+            const wrap = document.getElementById('manualStageWrap');
+            if (wrap) wrap.style.display = (manualState.finalTags && manualState.finalTags.length) ? 'block' : 'none';
+        }
+
+        function manualReset() {
+            manualState.generalTags = [];
+            manualState.characterTags = [];
+            manualState.finalTags = [];
+            manualState.seedPostId = null;
+            document.getElementById('manualGeneralInput').value = '';
+            document.getElementById('manualCharacterInput').value = '';
+            document.getElementById('manualPickedPostMeta').textContent = '';
+            const img = document.getElementById('manualPickedPostImg');
+            img.src = '';
+            img.style.display = 'none';
+            manualHideSuggest('manualGeneralSuggest');
+            manualHideSuggest('manualCharacterSuggest');
+            manualRender();
+        }
+
+        function manualHideSuggest(id) {
+            const el = document.getElementById(id);
+            if (!el) return;
+            el.classList.remove('active');
+            el.innerHTML = '';
+        }
+
+        function manualShowSuggest(id, items, onPick) {
+            const el = document.getElementById(id);
+            if (!el) return;
+            el.innerHTML = '';
+            if (!items || !items.length) {
+                el.classList.remove('active');
+                return;
+            }
+            items.forEach(item => {
+                const name = item?.name;
+                if (!name) return;
+                const type = item?.type || '';
+                const count = item?.posts_count;
+                const row = document.createElement('div');
+                row.className = 'suggest-item';
+                row.innerHTML = `
+                    <div>${escapeHtml(name)}</div>
+                    <div class="suggest-meta">${escapeHtml(type)}${(typeof count === 'number') ? ` · ${count.toLocaleString()}` : ''}</div>
+                `;
+                row.addEventListener('click', () => onPick(String(name)));
+                el.appendChild(row);
+            });
+            el.classList.add('active');
+        }
+
+        async function manualFetchTagSuggestions(query, type) {
+            const q = manualNormalizeTag(query);
+            if (!q || q.length < 2) return [];
+            const res = await fetch(`/api/rule34/tags/search?query=${encodeURIComponent(q)}&type=${encodeURIComponent(type)}&limit=12`);
+            if (!res.ok) return [];
+            const payload = await res.json();
+            return Array.isArray(payload?.data) ? payload.data : [];
+        }
+
+        function manualAddTyped(kind) {
+            const inputId = (kind === 'character') ? 'manualCharacterInput' : 'manualGeneralInput';
+            const el = document.getElementById(inputId);
+            const v = manualNormalizeTag(el.value);
+            if (!v) return;
+            manualAddTag(kind, v);
+            el.value = '';
+            manualHideSuggest(kind === 'character' ? 'manualCharacterSuggest' : 'manualGeneralSuggest');
+        }
+
+        async function manualStage() {
+            const btn = document.getElementById('manualStageBtn');
+            btn.disabled = true;
+            try {
+                if (!manualState.generalTags.length) {
+                    showStatus('Add at least one general tag before staging.', 'error');
+                    return;
+                }
+                const res = await fetch('/api/manual-runs/stage', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        general_tags: manualState.generalTags,
+                        character_tags: manualState.characterTags
+                    })
+                });
+                if (!res.ok) {
+                    const text = await res.text();
+                    throw new Error(text || `HTTP ${res.status}`);
+                }
+                const staged = await res.json();
+                manualState.finalTags = Array.isArray(staged?.final_tags) ? staged.final_tags : [];
+                manualState.seedPostId = staged?.selected_post?.id ?? null;
+
+                const meta = document.getElementById('manualPickedPostMeta');
+                const id = staged?.selected_post?.id;
+                const apiUrl = staged?.selected_post?.api_url;
+                meta.innerHTML = id ? `ID: <strong>${escapeHtml(id)}</strong>${apiUrl ? ` · <a href="${escapeHtml(apiUrl)}" target="_blank" rel="noreferrer">Open</a>` : ''}` : '';
+
+                const img = document.getElementById('manualPickedPostImg');
+                const previewUrl = staged?.selected_post?.preview_url;
+                if (previewUrl) {
+                    img.src = previewUrl;
+                    img.style.display = 'block';
+                } else {
+                    img.src = '';
+                    img.style.display = 'none';
+                }
+
+                manualRender();
+                showStatus('Staged run prompt from a random matching post.', 'success');
+            } catch (e) {
+                showStatus('Error staging run: ' + e.message, 'error');
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        async function manualSubmit() {
+            const btn = document.getElementById('manualSubmitBtn');
+            btn.disabled = true;
+            try {
+                const imageCountEl = document.getElementById('manualImageCount');
+                const imageCount = Math.max(1, Math.min(50, parseInt(imageCountEl.value || '10', 10) || 10));
+                if (!manualState.finalTags.length) {
+                    showStatus('Nothing staged yet. Click “Stage run” first.', 'error');
+                    return;
+                }
+                const res = await fetch('/api/manual-runs/submit', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        final_tags: manualState.finalTags,
+                        image_count: imageCount,
+                        seed_post_id: manualState.seedPostId
+                    })
+                });
+                if (!res.ok) {
+                    const text = await res.text();
+                    throw new Error(text || `HTTP ${res.status}`);
+                }
+                const run = await res.json();
+                showStatus(`Created run ${run?.id ? run.id.substring(0, 8) + '...' : ''} (queued for generation).`, 'success');
+                // Refresh runs if review page has been used before
+                if (document.getElementById('runSelect').dataset.loaded) {
+                    fetchRuns();
+                }
+                navigate('review');
+            } catch (e) {
+                showStatus('Error submitting run: ' + e.message, 'error');
+            } finally {
+                btn.disabled = false;
+            }
         }
 
         function convertUrl(url) {
@@ -1468,6 +1813,45 @@
         });
         document.getElementById('allowedTagInput').addEventListener('keydown', (e) => {
             if (e.key === 'Enter') addAllowedSearchTag();
+        });
+        document.getElementById('manualGeneralInput').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') manualAddTyped('general');
+            if (e.key === 'Escape') manualHideSuggest('manualGeneralSuggest');
+        });
+        document.getElementById('manualCharacterInput').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') manualAddTyped('character');
+            if (e.key === 'Escape') manualHideSuggest('manualCharacterSuggest');
+        });
+        document.getElementById('manualGeneralInput').addEventListener('input', (e) => {
+            const q = e.target.value;
+            if (manualGeneralTimer) clearTimeout(manualGeneralTimer);
+            manualGeneralTimer = setTimeout(async () => {
+                const items = await manualFetchTagSuggestions(q, 'general');
+                manualShowSuggest('manualGeneralSuggest', items, (name) => {
+                    manualAddTag('general', name);
+                    document.getElementById('manualGeneralInput').value = '';
+                    manualHideSuggest('manualGeneralSuggest');
+                });
+            }, 180);
+        });
+        document.getElementById('manualCharacterInput').addEventListener('input', (e) => {
+            const q = e.target.value;
+            if (manualCharacterTimer) clearTimeout(manualCharacterTimer);
+            manualCharacterTimer = setTimeout(async () => {
+                const items = await manualFetchTagSuggestions(q, 'character');
+                manualShowSuggest('manualCharacterSuggest', items, (name) => {
+                    manualAddTag('character', name);
+                    document.getElementById('manualCharacterInput').value = '';
+                    manualHideSuggest('manualCharacterSuggest');
+                });
+            }, 180);
+        });
+        document.addEventListener('click', (e) => {
+            // Close suggestion lists when clicking outside their inputs/wraps
+            const generalWrap = document.getElementById('manualGeneralSuggest')?.parentElement;
+            const characterWrap = document.getElementById('manualCharacterSuggest')?.parentElement;
+            if (generalWrap && !generalWrap.contains(e.target)) manualHideSuggest('manualGeneralSuggest');
+            if (characterWrap && !characterWrap.contains(e.target)) manualHideSuggest('manualCharacterSuggest');
         });
         window.addEventListener('hashchange', onRoute);
         onRoute();
