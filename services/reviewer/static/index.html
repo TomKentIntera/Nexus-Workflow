@@ -1161,7 +1161,14 @@
 
         async function manualFetchTagSuggestions(query, type) {
             const q = manualNormalizeTag(query);
-            if (!q || q.length < 2) return [];
+            // If empty, ask API for top tags (spec: query omitted/empty -> top tags)
+            if (!q) {
+                const res = await fetch(`/api/rule34/tags/search?type=${encodeURIComponent(type)}&limit=12`);
+                if (!res.ok) return [];
+                const payload = await res.json();
+                return Array.isArray(payload?.data) ? payload.data : [];
+            }
+            if (q.length < 2) return [];
             const res = await fetch(`/api/rule34/tags/search?query=${encodeURIComponent(q)}&type=${encodeURIComponent(type)}&limit=12`);
             if (!res.ok) return [];
             const payload = await res.json();
@@ -1834,6 +1841,16 @@
                 });
             }, 180);
         });
+        document.getElementById('manualGeneralInput').addEventListener('focus', async (e) => {
+            if (String(e.target.value || '').trim().length === 0) {
+                const items = await manualFetchTagSuggestions('', 'general');
+                manualShowSuggest('manualGeneralSuggest', items, (name) => {
+                    manualAddTag('general', name);
+                    document.getElementById('manualGeneralInput').value = '';
+                    manualHideSuggest('manualGeneralSuggest');
+                });
+            }
+        });
         document.getElementById('manualCharacterInput').addEventListener('input', (e) => {
             const q = e.target.value;
             if (manualCharacterTimer) clearTimeout(manualCharacterTimer);
@@ -1845,6 +1862,16 @@
                     manualHideSuggest('manualCharacterSuggest');
                 });
             }, 180);
+        });
+        document.getElementById('manualCharacterInput').addEventListener('focus', async (e) => {
+            if (String(e.target.value || '').trim().length === 0) {
+                const items = await manualFetchTagSuggestions('', 'character');
+                manualShowSuggest('manualCharacterSuggest', items, (name) => {
+                    manualAddTag('character', name);
+                    document.getElementById('manualCharacterInput').value = '';
+                    manualHideSuggest('manualCharacterSuggest');
+                });
+            }
         });
         document.addEventListener('click', (e) => {
             // Close suggestion lists when clicking outside their inputs/wraps

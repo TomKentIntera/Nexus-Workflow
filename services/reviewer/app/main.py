@@ -127,18 +127,28 @@ class Rule34TagSearchResponse(BaseModel):
 
 @app.get("/api/rule34/tags/search", tags=["api"])
 async def rule34_tag_search(
-    query: str = Query(..., min_length=1),
+    query: str | None = Query(default=None),
     tag_type: str | None = Query(default=None, alias="type"),
-    limit: int = Query(default=20, ge=1, le=100),
+    limit: int = Query(default=15, ge=1, le=50),
+    include_zero_posts: bool = Query(default=False),
 ) -> Dict:
     """
     Search tags on rule34.nexus.
 
     Uses: GET {RULE34_BASE_URL}/api/tags/search?query=...
     """
+    q = (query or "").strip()
+    t = (tag_type or "").strip().lower() or None
+    # The upstream API supports `type:term` prefixes in the `query` parameter.
+    # If caller supplies a `type`, translate it to the prefix form (unless already present).
+    if t and q and not re.match(r"^[a-z]+:", q, flags=re.IGNORECASE):
+        q = f"{t}:{q}"
     try:
         async with _rule34_client() as client:
-            res = await client.get("/api/tags/search", params={"query": query, "limit": limit})
+            params: Dict[str, object] = {"limit": limit, "include_zero_posts": include_zero_posts}
+            if q:
+                params["query"] = q
+            res = await client.get("/api/tags/search", params=params)
             res.raise_for_status()
             payload = res.json()
     except httpx.HTTPError as exc:
@@ -148,8 +158,9 @@ async def rule34_tag_search(
     data = payload.get("data") if isinstance(payload, dict) else None
     if not isinstance(data, list):
         data = []
-    if tag_type:
-        wanted = tag_type.strip().lower()
+    # If we didn't prefix (e.g. empty query), we may still want to filter the returned top tags.
+    if t and not q:
+        wanted = t
         data = [t for t in data if isinstance(t, dict) and str(t.get("type", "")).lower() == wanted]
     return {"data": data}
 
