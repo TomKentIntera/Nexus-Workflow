@@ -34,9 +34,12 @@ router = APIRouter(prefix="/runs", tags=["runs"])
 _MIN_APPROVAL_DELAY_MINUTES = 30
 _MAX_APPROVAL_DELAY_MINUTES = 60
 
-# Posting window (UTC): only schedule between 11:00 and 20:00 inclusive.
-_POSTING_WINDOW_START_HOUR = 11
-_POSTING_WINDOW_END_HOUR = 20
+# Posting window (UTC): only schedule between 12:00 and 21:00 inclusive.
+_POSTING_WINDOW_START_HOUR = 12
+_POSTING_WINDOW_END_HOUR = 21
+
+# Max number of posts scheduled per day (within posting window).
+_DAILY_SCHEDULED_POST_LIMIT = 12
 
 
 def _clamp_to_posting_window(candidate: datetime) -> datetime:
@@ -44,8 +47,8 @@ def _clamp_to_posting_window(candidate: datetime) -> datetime:
     Ensure `candidate` is within the allowed posting window.
 
     Rules:
-    - Anything before 11:00 is moved to 11:00 the same day.
-    - Anything after 20:00 is moved to 11:00 the next day.
+    - Anything before 12:00 is moved to 12:00 the same day.
+    - Anything after 21:00 is moved to 12:00 the next day.
     """
     window_start = candidate.replace(
         hour=_POSTING_WINDOW_START_HOUR, minute=0, second=0, microsecond=0
@@ -98,16 +101,49 @@ def _next_scheduled_time(session: Session, now: datetime) -> datetime:
 
     We intentionally base this only on the latest non-null `run_images.scheduled_time`,
     so scheduling always moves forward from the last scheduled post.
+
+    Additionally enforces a per-day cap: if there are already `_DAILY_SCHEDULED_POST_LIMIT`
+    images scheduled within the posting window for a given UTC day, the next image is
+    scheduled into the next day's window.
     """
     last_scheduled = session.execute(
         select(func.max(RunImage.scheduled_time)).where(RunImage.scheduled_time.is_not(None))
     ).scalar_one()
 
-    delay_minutes = random.randint(_MIN_APPROVAL_DELAY_MINUTES, _MAX_APPROVAL_DELAY_MINUTES)
+    # We may need to roll forward multiple days if earlier days are already "full".
     base = last_scheduled or now
-    candidate = base + timedelta(minutes=delay_minutes)
-    candidate = max(now, candidate)
-    return _clamp_to_posting_window(candidate)
+    while True:
+        delay_minutes = random.randint(_MIN_APPROVAL_DELAY_MINUTES, _MAX_APPROVAL_DELAY_MINUTES)
+        candidate = base + timedelta(minutes=delay_minutes)
+        candidate = max(now, candidate)
+        candidate = _clamp_to_posting_window(candidate)
+
+        window_start = candidate.replace(
+            hour=_POSTING_WINDOW_START_HOUR, minute=0, second=0, microsecond=0
+        )
+        window_end = candidate.replace(
+            hour=_POSTING_WINDOW_END_HOUR, minute=0, second=0, microsecond=0
+        )
+
+        scheduled_count = (
+            session.execute(
+                select(func.count())
+                .select_from(RunImage)
+                .where(
+                    RunImage.scheduled_time.is_not(None),
+                    RunImage.scheduled_time >= window_start,
+                    RunImage.scheduled_time <= window_end,
+                    RunImage.status.in_([RunImageStatus.APPROVED, RunImageStatus.POSTED]),
+                )
+            ).scalar_one()
+            or 0
+        )
+
+        if int(scheduled_count) < _DAILY_SCHEDULED_POST_LIMIT:
+            return candidate
+
+        # Day is full: move to the next day's window start and try again.
+        base = window_start + timedelta(days=1)
 
 
 @router.post("", response_model=RunRead, status_code=status.HTTP_201_CREATED)
