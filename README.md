@@ -20,6 +20,48 @@ Orchestrates an image-generation workflow built on n8n, FastAPI, MySQL, and MinI
    - Link Submitter (mobile): http://localhost:3001/
    - MinIO console: http://localhost:9001/
 
+## Periodically restarting the image generator
+If the `image-generator` service gets stuck during long runs, you can proactively restart it on a schedule (e.g., every 6 hours).
+
+### Option A: cron (simple)
+1. Make the helper script executable:
+   - `chmod +x Scripts/restart-image-generator.sh`
+2. Edit your crontab:
+   - `crontab -e`
+3. Add a line to restart every 6 hours:
+   - `0 */6 * * * /bin/bash /path/to/repo/Scripts/restart-image-generator.sh >> /var/log/image-generator-restart.log 2>&1`
+
+### Option B: systemd timer (recommended for servers)
+Create these two files on the host:
+
+`/etc/systemd/system/image-generator-restart.service`
+```ini
+[Unit]
+Description=Restart docker-compose image-generator
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /path/to/repo/Scripts/restart-image-generator.sh
+```
+
+`/etc/systemd/system/image-generator-restart.timer`
+```ini
+[Unit]
+Description=Restart docker-compose image-generator every 6 hours
+
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=6h
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+```
+
+Then enable it:
+- `sudo systemctl daemon-reload`
+- `sudo systemctl enable --now image-generator-restart.timer`
+
 ## Workflow Overview
 1. n8n calls `services/n8n/scripts/images/generate.py` with prompt parameters. The script generates `count` images, uploads them to MinIO (if configured), and prints a JSON summary.
 2. n8n registers a run via `POST /runs`, then either attaches the image metadata in the same request or calls `POST /runs/{id}/images` when uploads finish.
