@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react'
+import { applyTheme, getStoredTheme, getSystemTheme, getThemeFromDom, type Theme } from './theme'
 
 type LinkSubmissionResponse = {
   id: string
@@ -43,6 +44,7 @@ async function submitLink(url: string, sourceUrl: string): Promise<LinkSubmissio
 }
 
 export function App() {
+  const [theme, setTheme] = useState<Theme>(() => getThemeFromDom() ?? getStoredTheme() ?? getSystemTheme())
   const [url, setUrl] = useState('')
   const [sourceUrl, setSourceUrl] = useState('')
   const [busy, setBusy] = useState(false)
@@ -53,6 +55,12 @@ export function App() {
   const normalizedSourceUrl = useMemo(() => normalizeUrl(sourceUrl), [sourceUrl])
 
   const canSubmit = normalizedUrl.length > 0 && !busy
+
+  function onToggleTheme() {
+    const next: Theme = theme === 'dark' ? 'light' : 'dark'
+    applyTheme(next, { persist: true })
+    setTheme(next)
+  }
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -75,8 +83,19 @@ export function App() {
     <div className="wrap">
       <div className="card">
         <div className="header">
-          <h1 className="title">Link Submitter</h1>
-          <p className="hint">Sends URL to API, triggers n8n webhook</p>
+          <div className="headerText">
+            <h1 className="title">Link Submitter</h1>
+            <p className="hint">Sends URL to API, triggers n8n webhook</p>
+          </div>
+          <button
+            type="button"
+            className="themeToggle"
+            aria-label="Toggle dark mode"
+            aria-pressed={theme === 'dark'}
+            onClick={onToggleTheme}
+          >
+            {theme === 'dark' ? 'Dark' : 'Light'}
+          </button>
         </div>
 
         <form onSubmit={onSubmit}>
