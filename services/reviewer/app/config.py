@@ -8,6 +8,7 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     api_base_url: str = Field("http://api:8000", description="Workflow API base URL")
+    rule34_base_url: str = Field("https://rule34.nexus", description="Rule34 Nexus base URL")
     default_approver: str = Field("reviewer", description="Fallback approver name")
     request_timeout: float = Field(15.0, description="HTTP timeout in seconds")
 
