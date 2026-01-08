@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+import random
 import os
 import time
 from typing import Any, List, Sequence
@@ -29,6 +30,32 @@ from ..clients.minio_client import MinioConfigError, MinioPutError, put_object_b
 from ..config import get_settings
 
 router = APIRouter(prefix="/runs", tags=["runs"])
+
+_MIN_APPROVAL_DELAY_MINUTES = 30
+_MAX_APPROVAL_DELAY_MINUTES = 60
+
+# Posting window (UTC): only schedule between 11:00 and 20:00 inclusive.
+_POSTING_WINDOW_START_HOUR = 11
+_POSTING_WINDOW_END_HOUR = 20
+
+
+def _clamp_to_posting_window(candidate: datetime) -> datetime:
+    """
+    Ensure `candidate` is within the allowed posting window.
+
+    Rules:
+    - Anything before 11:00 is moved to 11:00 the same day.
+    - Anything after 20:00 is moved to 11:00 the next day.
+    """
+    window_start = candidate.replace(
+        hour=_POSTING_WINDOW_START_HOUR, minute=0, second=0, microsecond=0
+    )
+    window_end = candidate.replace(hour=_POSTING_WINDOW_END_HOUR, minute=0, second=0, microsecond=0)
+    if candidate < window_start:
+        return window_start
+    if candidate > window_end:
+        return window_start + timedelta(days=1)
+    return candidate
 
 
 def _get_run(session: Session, run_id: str) -> Run:
@@ -67,20 +94,20 @@ def _next_scheduled_time(session: Session, now: datetime) -> datetime:
     """
     Compute the next scheduled time for an approved image.
 
-    scheduled_time = max(now, last_scheduled_time + 30 minutes)
+    scheduled_time = max(now, base + random(30..60) minutes)
 
     We intentionally base this only on the latest non-null `run_images.scheduled_time`,
-    so scheduling always moves forward in 30-minute increments from the last scheduled post.
+    so scheduling always moves forward from the last scheduled post.
     """
     last_scheduled = session.execute(
         select(func.max(RunImage.scheduled_time)).where(RunImage.scheduled_time.is_not(None))
     ).scalar_one()
 
-    if last_scheduled is None:
-        return now
-
-    candidate = last_scheduled + timedelta(minutes=30)
-    return max(now, candidate)
+    delay_minutes = random.randint(_MIN_APPROVAL_DELAY_MINUTES, _MAX_APPROVAL_DELAY_MINUTES)
+    base = last_scheduled or now
+    candidate = base + timedelta(minutes=delay_minutes)
+    candidate = max(now, candidate)
+    return _clamp_to_posting_window(candidate)
 
 
 @router.post("", response_model=RunRead, status_code=status.HTTP_201_CREATED)
