@@ -7,6 +7,9 @@ import time
 import sys
 import traceback
 import json
+import signal
+import threading
+from datetime import datetime, timezone
 from typing import Any, Optional
 from uuid import uuid4
 
@@ -89,6 +92,142 @@ def _lease_next_run(api_base: str) -> Optional[dict[str, Any]]:
     return None
 
 
+def _parse_dt(value: str) -> Optional[datetime]:
+    """
+    Parse API timestamps (typically ISO8601) into an aware UTC datetime.
+    """
+    v = (value or "").strip()
+    if not v:
+        return None
+    # Common FastAPI/json formats include "...Z" or explicit offsets.
+    if v.endswith("Z"):
+        v = v[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(v)
+    except Exception:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _get_queued_count(api_base: str) -> Optional[int]:
+    """
+    Returns the number of queued runs according to the API.
+    """
+    try:
+        resp = requests.get(f"{api_base}/runs", timeout=10)
+        if not resp.ok:
+            return None
+        data = resp.json()
+        if isinstance(data, dict):
+            qc = data.get("queued_count")
+            if isinstance(qc, int):
+                return qc
+            if isinstance(qc, str) and qc.isdigit():
+                return int(qc)
+    except Exception:
+        return None
+    return None
+
+
+def _get_latest_image_created_at(api_base: str) -> Optional[datetime]:
+    """
+    Returns created_at of the most recently created RunImage (any status).
+    """
+    try:
+        resp = requests.get(f"{api_base}/runs/images", params={"limit": 1, "offset": 0}, timeout=10)
+        if not resp.ok:
+            return None
+        data = resp.json()
+        if not isinstance(data, dict):
+            return None
+        images = data.get("images")
+        if not isinstance(images, list) or not images:
+            return None
+        first = images[0]
+        if not isinstance(first, dict):
+            return None
+        created_at = first.get("created_at")
+        if isinstance(created_at, str):
+            return _parse_dt(created_at)
+    except Exception:
+        return None
+    return None
+
+
+def _start_watchdog(
+    *,
+    api_base: str,
+    last_progress_utc: "dict[str, datetime]",
+) -> None:
+    """
+    Watchdog: if there are queued runs and no image has been generated recently,
+    terminate the process so Docker can restart the container (restart: unless-stopped).
+    """
+    enabled = (os.environ.get("WF_WATCHDOG_ENABLED", "true").strip().lower() in {"1", "true", "yes", "y", "on"})
+    if not enabled:
+        print("🧯 Watchdog disabled (WF_WATCHDOG_ENABLED=false)")
+        return
+
+    interval = int(os.environ.get("WF_WATCHDOG_INTERVAL_SECONDS", "60"))
+    stall_seconds = int(os.environ.get("WF_WATCHDOG_STALL_SECONDS", str(30 * 60)))
+    min_uptime_seconds = int(os.environ.get("WF_WATCHDOG_MIN_UPTIME_SECONDS", "600"))
+    restart_signal = os.environ.get("WF_WATCHDOG_RESTART_SIGNAL", "SIGTERM").strip().upper() or "SIGTERM"
+
+    sig = signal.SIGTERM
+    if restart_signal == "SIGKILL":
+        sig = signal.SIGKILL
+    elif restart_signal == "SIGINT":
+        sig = signal.SIGINT
+
+    started = datetime.now(timezone.utc)
+
+    def _loop() -> None:
+        while True:
+            try:
+                # Don't restart during early startup (model load, first job warmup, etc.).
+                now = datetime.now(timezone.utc)
+                if (now - started).total_seconds() < max(min_uptime_seconds, 0):
+                    time.sleep(max(interval, 5))
+                    continue
+
+                queued = _get_queued_count(api_base)
+                if queued is None or queued <= 0:
+                    time.sleep(max(interval, 5))
+                    continue
+
+                latest_api_image = _get_latest_image_created_at(api_base)
+                last_progress = last_progress_utc.get("value")
+                last_seen = max([d for d in [latest_api_image, last_progress] if d is not None], default=None)
+                if last_seen is None:
+                    # No visibility into progress; don't flap-restart on uncertainty.
+                    time.sleep(max(interval, 5))
+                    continue
+
+                stalled_for = (now - last_seen).total_seconds()
+                if stalled_for > stall_seconds:
+                    print(
+                        f"🧯 Watchdog: queued runs={queued} but no image generated in {int(stalled_for)}s "
+                        f"(threshold={stall_seconds}s). Restarting process."
+                    )
+                    # Ask PID 1 to exit; docker will restart container.
+                    os.kill(os.getpid(), sig)
+                    # If the signal is ignored for some reason, hard-exit shortly after.
+                    time.sleep(5)
+                    os._exit(1)
+            except Exception as exc:
+                # Never let watchdog crash the worker.
+                print(f"🧯 Watchdog warning: {exc}")
+            time.sleep(max(interval, 5))
+
+    t = threading.Thread(target=_loop, name="watchdog", daemon=True)
+    t.start()
+    print(
+        f"🧯 Watchdog enabled: interval={interval}s stall_threshold={stall_seconds}s min_uptime={min_uptime_seconds}s"
+    )
+
+
 def _upload_image(api_base: str, run_id: str, ordinal: int, image_path: str) -> bool:
     try:
         machine_id = _machine_id()
@@ -123,6 +262,7 @@ def process_queued_runs() -> None:
     model_id = os.environ.get("MODEL_ID", "Heartsync/NSFW-Uncensored")
     api_base = _api_base_url()
     machine_id = _machine_id()
+    last_progress_utc: dict[str, datetime] = {"value": datetime.now(timezone.utc)}
     
     print("🚀 Image Generation Worker started")
     print(f"   Polling every {poll_interval} seconds")
@@ -136,6 +276,9 @@ def process_queued_runs() -> None:
     model.load_model()
     print("✅ Model loaded and ready!")
     print()
+
+    # Start watchdog after model is ready (avoid restarting during slow first-time downloads).
+    _start_watchdog(api_base=api_base, last_progress_utc=last_progress_utc)
     
     while True:
         try:
@@ -220,6 +363,7 @@ def process_queued_runs() -> None:
                     image_path = save_result["local_path"]
                     if _upload_image(api_base, run_id, ordinal, image_path):
                         uploaded += 1
+                        last_progress_utc["value"] = datetime.now(timezone.utc)
 
                 if uploaded == 0:
                     raise RuntimeError("No images uploaded successfully")
