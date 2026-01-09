@@ -28,6 +28,7 @@ class RunImageRead(BaseModel):
     status: RunImageStatus
     notes: Optional[str] = None
     fanvue_uuid: Optional[str] = None
+    r34_uuid: Optional[str] = None
     created_at: datetime
 
 
@@ -141,6 +142,7 @@ class RunImageListItem(BaseModel):
     status: RunImageStatus
     notes: Optional[str] = None
     fanvue_uuid: Optional[str] = None
+    r34_uuid: Optional[str] = None
     created_at: datetime
     run_created_at: Optional[datetime] = None
     prompt: Optional[str] = None
