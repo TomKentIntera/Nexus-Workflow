@@ -1161,18 +1161,28 @@
 
         async function manualFetchTagSuggestions(query, type) {
             const q = manualNormalizeTag(query);
-            // If empty, ask API for top tags (spec: query omitted/empty -> top tags)
+            // Use backend proxy to avoid CORS issues
+            // Backend handles: /api/tags/related when no query, /api/tags/search when query provided
+            let url;
             if (!q) {
-                const res = await fetch(`/api/rule34/tags/search?type=${encodeURIComponent(type)}&limit=12`);
+                // No query - backend will use /api/tags/related
+                url = `/api/rule34/tags/search?limit=12`;
+            } else if (q.length < 2) {
+                return []; // Need at least 2 characters
+            } else {
+                // Has query - backend will use /api/tags/search with just the query
+                url = `/api/rule34/tags/search?query=${encodeURIComponent(q)}&limit=12`;
+            }
+            
+            try {
+                const res = await fetch(url);
                 if (!res.ok) return [];
                 const payload = await res.json();
                 return Array.isArray(payload?.data) ? payload.data : [];
+            } catch (error) {
+                console.error('Error fetching tags from Rule34:', error);
+                return [];
             }
-            if (q.length < 2) return [];
-            const res = await fetch(`/api/rule34/tags/search?query=${encodeURIComponent(q)}&type=${encodeURIComponent(type)}&limit=12`);
-            if (!res.ok) return [];
-            const payload = await res.json();
-            return Array.isArray(payload?.data) ? payload.data : [];
         }
 
         function manualAddTyped(kind) {

@@ -4,6 +4,8 @@ from typing import Dict, List, Optional
 import os
 import re
 import secrets
+import logging
+import sys
 
 import httpx
 from fastapi import FastAPI, HTTPException, Query
@@ -15,6 +17,13 @@ from minio.error import S3Error
 from pydantic import BaseModel, Field
 
 from .config import get_settings
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 settings = get_settings()
 app = FastAPI(title="Reviewer UI", version="0.2.0")
@@ -128,41 +137,60 @@ class Rule34TagSearchResponse(BaseModel):
 @app.get("/api/rule34/tags/search", tags=["api"])
 async def rule34_tag_search(
     query: str | None = Query(default=None),
-    tag_type: str | None = Query(default=None, alias="type"),
     limit: int = Query(default=15, ge=1, le=50),
-    include_zero_posts: bool = Query(default=False),
 ) -> Dict:
     """
-    Search tags on rule34.nexus.
-
-    Uses: GET {RULE34_BASE_URL}/api/tags/search?query=...
+    Proxy tag search requests to rule34.nexus API.
+    
+    - With query: GET https://rule34.nexus/api/tags/search?query=...&limit=...
+    - Without query: GET https://rule34.nexus/api/tags/related?limit=...
+    
+    Returns the response from Rule34 API as-is.
     """
     q = (query or "").strip()
-    t = (tag_type or "").strip().lower() or None
-    # The upstream API supports `type:term` prefixes in the `query` parameter.
-    # If caller supplies a `type`, translate it to the prefix form (unless already present).
-    if t and q and not re.match(r"^[a-z]+:", q, flags=re.IGNORECASE):
-        q = f"{t}:{q}"
+    has_query = bool(q)
+    
     try:
-        async with _rule34_client() as client:
-            params: Dict[str, object] = {"limit": limit, "include_zero_posts": include_zero_posts}
-            if q:
-                params["query"] = q
-            res = await client.get("/api/tags/search", params=params)
+        client = httpx.AsyncClient(
+            base_url=settings.rule34_base_url, 
+            timeout=settings.request_timeout,
+            follow_redirects=True
+        )
+        try:
+            if has_query:
+                # Has query - use /api/tags/search with just query and limit
+                params = {"query": q, "limit": limit}
+                endpoint = "/api/tags/search"
+                logger.info(f"Proxying to Rule34 API: {settings.rule34_base_url}{endpoint} with params: {params}")
+                res = await client.get(endpoint, params=params)
+            else:
+                # No query - use /api/tags/related for top tags
+                params = {"limit": limit}
+                endpoint = "/api/tags/related"
+                logger.info(f"Proxying to Rule34 API: {settings.rule34_base_url}{endpoint} with params: {params}")
+                res = await client.get(endpoint, params=params)
+            
             res.raise_for_status()
-            payload = res.json()
+            # Return the response as-is from Rule34
+            return res.json()
+        finally:
+            await client.aclose()
+    except httpx.ConnectError as exc:
+        error_msg = f"Cannot connect to Rule34 API at {settings.rule34_base_url}. Error: {str(exc)}"
+        logger.error(f"Rule34 connection error: {error_msg}")
+        raise HTTPException(status_code=502, detail=error_msg)
+    except httpx.HTTPStatusError as exc:
+        error_msg = f"Rule34 API returned error {exc.response.status_code}: {exc.response.text[:200]}"
+        logger.error(f"Rule34 HTTP error: {error_msg}")
+        raise HTTPException(status_code=502, detail=error_msg)
     except httpx.HTTPError as exc:
-        raise HTTPException(status_code=502, detail=f"Rule34 tag search failed: {exc}")
-
-    # Normalize/shape response
-    data = payload.get("data") if isinstance(payload, dict) else None
-    if not isinstance(data, list):
-        data = []
-    # If we didn't prefix (e.g. empty query), we may still want to filter the returned top tags.
-    if t and not q:
-        wanted = t
-        data = [t for t in data if isinstance(t, dict) and str(t.get("type", "")).lower() == wanted]
-    return {"data": data}
+        error_msg = f"Rule34 tag search failed: {str(exc)}"
+        logger.error(f"Rule34 HTTP error: {error_msg}")
+        raise HTTPException(status_code=502, detail=error_msg)
+    except Exception as exc:
+        error_msg = f"Unexpected error in Rule34 tag search: {type(exc).__name__}: {str(exc)}"
+        logger.exception("Unexpected error in Rule34 tag search")
+        raise HTTPException(status_code=502, detail=error_msg)
 
 
 @app.get("/api/rule34/posts", tags=["api"])
