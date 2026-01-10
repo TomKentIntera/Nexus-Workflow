@@ -28,6 +28,7 @@ from ..schemas import (
 )
 from ..clients.minio_client import MinioConfigError, MinioPutError, put_object_bytes
 from ..config import get_settings
+from ..services.new_relic import emit_new_relic_event
 
 router = APIRouter(prefix="/runs", tags=["runs"])
 
@@ -212,6 +213,18 @@ def lease_next_run(session: Session = Depends(get_session)) -> RunLeaseResponse:
     )
     requested = _extract_image_count(run.parameter_blob)
     remaining = max(requested - int(generated_images or 0), 0)
+
+    emit_new_relic_event(
+        "RunLeased",
+        {
+            "run_id": run.id,
+            "workflow_id": run.workflow_id,
+            "leased_until": (run.leased_until.isoformat() if run.leased_until else None),
+            "requested_images": int(requested),
+            "generated_images": int(generated_images or 0),
+            "remaining_images": int(remaining),
+        },
+    )
 
     return RunLeaseResponse(
         id=run.id,
@@ -453,6 +466,17 @@ def upload_run_image(
     session.add(run)
     session.commit()
     session.refresh(img)
+
+    emit_new_relic_event(
+        "ImageGenerated",
+        {
+            "run_id": run_id,
+            "image_id": img.id,
+            "ordinal": int(ordinal),
+            "asset_uri": asset_uri,
+            "machine_id": (img.generated_by_machine_id or "unknown"),
+        },
+    )
     return img
 
 

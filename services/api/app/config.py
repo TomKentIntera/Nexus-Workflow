@@ -18,6 +18,20 @@ class Settings(BaseSettings):
     cors_allow_origins: str = "*"
     n8n_link_submission_webhook: Optional[HttpUrl] = None
 
+    # New Relic telemetry (optional)
+    #
+    # Preferred (license key): we emit these "events" as New Relic Logs, using the Log API.
+    # - new_relic_license_key: New Relic account license key
+    # - new_relic_logs_url: optional override (e.g. EU region endpoint)
+    new_relic_license_key: Optional[str] = None
+    new_relic_logs_url: Optional[AnyHttpUrl] = None
+
+    # Legacy (insert key) support kept for compatibility. If present and license key is not set,
+    # we will send to the Insights Events endpoint.
+    new_relic_events_url: Optional[AnyHttpUrl] = None
+    new_relic_account_id: Optional[str] = None
+    new_relic_insert_key: Optional[str] = None
+
     # Tag filtering (used by n8n workflows)
     # - WF_BANNED_TAGS: comma/newline-separated or JSON list (e.g. '["English text","logo"]')
     # - WF_BANNED_TAGS_FILE: optional path to a file containing tags (one per line or comma-separated)
