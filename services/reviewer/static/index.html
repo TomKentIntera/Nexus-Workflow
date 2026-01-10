@@ -1047,6 +1047,7 @@
             characterTags: [],
             finalTags: [],
             seedPostId: null,
+            originalTags: { "artist": [], "series": [], "general": [], "character": [] },
         };
         let manualGeneralTimer = null;
         let manualCharacterTimer = null;
@@ -1116,6 +1117,7 @@
             manualState.characterTags = [];
             manualState.finalTags = [];
             manualState.seedPostId = null;
+            manualState.originalTags = { "artist": [], "series": [], "general": [], "character": [] };
             document.getElementById('manualGeneralInput').value = '';
             document.getElementById('manualCharacterInput').value = '';
             document.getElementById('manualPickedPostMeta').textContent = '';
@@ -1222,6 +1224,7 @@
                 const staged = await res.json();
                 manualState.finalTags = Array.isArray(staged?.final_tags) ? staged.final_tags : [];
                 manualState.seedPostId = staged?.selected_post?.id ?? null;
+                manualState.originalTags = staged?.original_tags || { "artist": [], "series": [], "general": [], "character": [] };
 
                 const meta = document.getElementById('manualPickedPostMeta');
                 const id = staged?.selected_post?.id;
@@ -1263,7 +1266,8 @@
                     body: JSON.stringify({
                         final_tags: manualState.finalTags,
                         image_count: imageCount,
-                        seed_post_id: manualState.seedPostId
+                        seed_post_id: manualState.seedPostId,
+                        original_tags: manualState.originalTags || { "artist": [], "series": [], "general": [], "character": [] }
                     })
                 });
                 if (!res.ok) {

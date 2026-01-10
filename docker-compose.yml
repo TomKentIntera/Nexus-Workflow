@@ -77,6 +77,9 @@ services:
     environment:
       APP_ENV: "development"
       LOG_LEVEL: "info"
+      # New Relic configuration (set WF_NEW_RELIC_LICENSE_KEY in .env file)
+      # WF_NEW_RELIC_ENABLED: "true"  # Set to "false" to disable
+      # WF_NEW_RELIC_APP_NAME: "Nexus Workflow API"  # Optional, defaults to this
     networks:
       - workflow_stack
     depends_on:

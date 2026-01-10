@@ -29,6 +29,13 @@ from ..schemas import (
 from ..clients.minio_client import MinioConfigError, MinioPutError, put_object_bytes
 from ..config import get_settings
 
+# New Relic custom event tracking
+try:
+    import newrelic.agent
+    NEW_RELIC_AVAILABLE = True
+except ImportError:
+    NEW_RELIC_AVAILABLE = False
+
 router = APIRouter(prefix="/runs", tags=["runs"])
 
 _MIN_APPROVAL_DELAY_MINUTES = 30
@@ -212,6 +219,29 @@ def lease_next_run(session: Session = Depends(get_session)) -> RunLeaseResponse:
     )
     requested = _extract_image_count(run.parameter_blob)
     remaining = max(requested - int(generated_images or 0), 0)
+
+    # Send custom event to New Relic for run lease
+    if NEW_RELIC_AVAILABLE:
+        try:
+            settings = get_settings()
+            if settings.new_relic_enabled and settings.new_relic_license_key:
+                newrelic.agent.record_custom_event(
+                    "RunLeased",
+                    {
+                        "run_id": run.id,
+                        "workflow_id": run.workflow_id or "",
+                        "requested_images": requested,
+                        "generated_images": int(generated_images or 0),
+                        "remaining_images": remaining,
+                        "leased_until": run.leased_until.isoformat() if run.leased_until else None,
+                    }
+                )
+                print(f"📊 New Relic: Recorded RunLeased event for run_id={run.id}")
+        except Exception as e:
+            # Don't fail the request if New Relic logging fails
+            print(f"⚠️  Warning: Failed to record New Relic event for run lease: {e}")
+            import traceback
+            traceback.print_exc()
 
     return RunLeaseResponse(
         id=run.id,
@@ -453,6 +483,32 @@ def upload_run_image(
     session.add(run)
     session.commit()
     session.refresh(img)
+
+    # Send custom event to New Relic for image generation
+    if NEW_RELIC_AVAILABLE:
+        try:
+            settings = get_settings()
+            if settings.new_relic_enabled and settings.new_relic_license_key:
+                newrelic.agent.record_custom_event(
+                    "ImageGenerated",
+                    {
+                        "run_id": run_id,
+                        "image_id": img.id,
+                        "machine_id": x_machine_id.strip() if x_machine_id else None,
+                        "ordinal": ordinal,
+                        "workflow_id": run.workflow_id or "",
+                        "status": img.status.value,
+                        "image_size_bytes": len(data),
+                        "content_type": file.content_type or "unknown",
+                    }
+                )
+                print(f"📊 New Relic: Recorded ImageGenerated event for run_id={run_id}, image_id={img.id}, machine_id={x_machine_id}")
+        except Exception as e:
+            # Don't fail the request if New Relic logging fails
+            print(f"⚠️  Warning: Failed to record New Relic event for image generation: {e}")
+            import traceback
+            traceback.print_exc()
+
     return img
 
 

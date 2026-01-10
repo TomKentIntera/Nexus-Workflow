@@ -20,9 +20,35 @@ from .config import get_settings
 from .database import Base, SessionLocal, engine
 from .models import Run, RunStatus
 
+# Initialize New Relic if configured (must be done before creating the app)
+settings = get_settings()
+new_relic_initialized = False
+if settings.new_relic_enabled:
+    if settings.new_relic_license_key:
+        # Set New Relic configuration via environment variables
+        os.environ["NEW_RELIC_LICENSE_KEY"] = settings.new_relic_license_key
+        os.environ["NEW_RELIC_APP_NAME"] = settings.new_relic_app_name
+        os.environ["NEW_RELIC_LOG"] = "stdout"
+        os.environ["NEW_RELIC_MONITOR_MODE"] = "true"
+        # Initialize New Relic agent
+        try:
+            import newrelic.agent
+            newrelic.agent.initialize()
+            new_relic_initialized = True
+            print(f"✅ New Relic agent initialized (app: {settings.new_relic_app_name})")
+        except ImportError:
+            print("⚠️  Warning: newrelic package not installed. Install with: pip install newrelic")
+        except Exception as e:
+            print(f"⚠️  Warning: Failed to initialize New Relic agent: {e}")
+            import traceback
+            traceback.print_exc()
+    else:
+        print("⚠️  Warning: New Relic enabled but WF_NEW_RELIC_LICENSE_KEY not set")
+else:
+    print("ℹ️  New Relic disabled (WF_NEW_RELIC_ENABLED=false or not set)")
+
 app = FastAPI(title="Workflow Helper API", version="0.4.0")
 
-settings = get_settings()
 _origins = [o.strip() for o in (settings.cors_allow_origins or "*").split(",") if o.strip()]
 if not _origins:
     _origins = ["*"]
@@ -34,6 +60,18 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Wrap FastAPI app with New Relic ASGI middleware if enabled
+if new_relic_initialized:
+    try:
+        import newrelic.agent
+        from newrelic.api.asgi_application import ASGIApplicationWrapper
+        app = ASGIApplicationWrapper(app)
+        print("✅ New Relic ASGI wrapper applied")
+    except Exception as e:
+        print(f"⚠️  Warning: Failed to wrap app with New Relic ASGI wrapper: {e}")
+        import traceback
+        traceback.print_exc()
 
 
 def _lease_reaper_loop() -> None:

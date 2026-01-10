@@ -32,6 +32,11 @@ class Settings(BaseSettings):
     wd14_general_threshold: float = 0.35
     wd14_character_threshold: float = 0.85
 
+    # New Relic settings
+    new_relic_license_key: Optional[str] = None
+    new_relic_app_name: str = "Nexus Workflow API"
+    new_relic_enabled: bool = True
+
     class Config:
         env_prefix = "WF_"
         env_file = ".env"

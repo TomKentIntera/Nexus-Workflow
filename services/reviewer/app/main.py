@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from typing import Dict, List, Optional
+from urllib.parse import urlencode, urljoin
 import os
 import re
 import secrets
 import logging
 import sys
+import uuid
 
 import httpx
 from fastapi import FastAPI, HTTPException, Query
@@ -114,6 +116,16 @@ def _dedupe_preserve_order(values: List[str]) -> List[str]:
         seen.add(key)
         out.append(v.strip())
     return out
+
+
+def _tagify(tag: str) -> str:
+    """
+    Convert a tag to r34.nexus format: remove spaces and non-alphanumeric characters.
+    Example: "cat girl" -> "catgirl", "69" -> "69"
+    """
+    # Remove all spaces and non-alphanumeric characters except numbers
+    tagified = re.sub(r'[^a-zA-Z0-9]', '', tag.strip())
+    return tagified.lower() if tagified else ""
 
 
 _RE_BOY_GIRL = re.compile(r"^\d+(?:boy|girl|boys|girls)$", re.IGNORECASE)
@@ -243,10 +255,11 @@ class ManualStageRequest(BaseModel):
     character_tags: List[str] = Field(default_factory=list)
 
 
-def _post_has_all_required_tags(post_tags: object, required: List[str]) -> bool:
+def _post_has_all_required_tags(post_tags: object, required: List[str], required_type: str | None = None) -> bool:
     """
     Best-effort check that a post's tags include all required tag names.
-    Uses case-insensitive matching and ignores tag type.
+    Uses case-insensitive matching.
+    If required_type is specified (e.g., "general"), only checks tags of that type.
     """
     if not required:
         return True
@@ -255,6 +268,11 @@ def _post_has_all_required_tags(post_tags: object, required: List[str]) -> bool:
     for t in tags:
         if not isinstance(t, dict):
             continue
+        # If required_type is specified, only check tags of that type
+        if required_type:
+            tag_type = str(t.get("type", "")).strip().lower()
+            if tag_type != required_type.lower():
+                continue
         name = t.get("name")
         if isinstance(name, str) and name.strip():
             present.add(name.strip().casefold())
@@ -297,10 +315,29 @@ async def manual_stage_run(payload: ManualStageRequest) -> Dict:
     if not general_tags:
         raise HTTPException(status_code=400, detail="At least one general tag is required to stage a run")
 
-    tags_query = " ".join(general_tags)
+    # Only search posts using general tags (character tags are prepended later)
+    # Tagify tags: remove spaces and non-alphanumeric, then join with commas
+    tagified_tags = [_tagify(tag) for tag in general_tags]
+    tagified_tags = [t for t in tagified_tags if t]  # Remove empty tags
+    if not tagified_tags:
+        raise HTTPException(status_code=400, detail="No valid general tags after tagification")
+    
+    # Join with comma for r34.nexus API format: filter[tags]=tag1,tag2,tag3
+    tags_comma_separated = ",".join(tagified_tags)
+    
     try:
         async with _rule34_client() as client:
-            posts_res = await client.get("/api/posts", params={"tags": tags_query, "limit": 200})
+            # r34.nexus uses filter[tags] parameter with comma-separated, tagified tags
+            # The urlencode function will properly encode filter[tags] to filter%5Btags%5D
+            # and commas in tag values will be encoded as %2C
+            # Note: per_page maximum is 50
+            params = {"filter[tags]": tags_comma_separated, "page": 1, "per_page": 50}
+            # Build the full URL for logging with proper encoding
+            search_url = urljoin(str(settings.rule34_base_url).rstrip('/') + '/', "api/posts")
+            query_string = urlencode(params, doseq=False)
+            full_url = f"{search_url}?{query_string}"
+            logger.info(f"Staging manual run: searching posts at {full_url}")
+            posts_res = await client.get("/api/posts", params=params)
             posts_res.raise_for_status()
             posts_payload = posts_res.json()
     except httpx.HTTPError as exc:
@@ -352,7 +389,9 @@ async def manual_stage_run(payload: ManualStageRequest) -> Dict:
         if not isinstance(obj, dict):
             continue
 
-        if _post_has_all_required_tags(obj.get("tags"), general_tags):
+        # Verify that the post has all required general tags as type "general"
+        # Character tags are user-provided and will be prepended later, so we don't verify them here
+        if _post_has_all_required_tags(obj.get("tags"), general_tags, required_type="general"):
             post_id = pid
             post_obj = obj
             break
@@ -375,17 +414,59 @@ async def manual_stage_run(payload: ManualStageRequest) -> Dict:
             continue
         name = t.get("name")
         if isinstance(name, str) and name.strip():
-            extracted_general.append(name.strip())
+            # Convert r34.nexus tag format (tag_name) to space-separated format (tag name)
+            # for comparison with banned tags which are in "tag name" format
+            tag_with_spaces = name.strip().replace("_", " ")
+            extracted_general.append(tag_with_spaces)
 
     cleaned_general = [t for t in extracted_general if not _is_common_general_tag(t)]
     cleaned_general = _dedupe_preserve_order(cleaned_general)
 
-    # Remove any tags that are banned.
+    # Save original character tags for response (before normalization)
     input_character_tags = list(character_tags)
+
+    # Normalize character tags: convert underscores to spaces (in case user copied from r34.nexus)
+    # This ensures consistent format for banned tag comparison
+    character_tags = [tag.replace("_", " ") for tag in character_tags]
+
+    # Normalize user's input general tags to space format for matching
+    # (user tags might have underscores if copied from r34.nexus)
+    normalized_input_general = [tag.replace("_", " ") for tag in general_tags]
+
+    # Remove any tags that are banned.
+    # Note: banned tags are in "tag name" format (with spaces), and we've converted
+    # both r34.nexus tags and character tags from "tag_name" to "tag name" format above
     banned = await _fetch_banned_tags_casefolded()
     if banned:
         cleaned_general = [t for t in cleaned_general if t.casefold() not in banned]
         character_tags = [t for t in character_tags if t.casefold() not in banned]
+        normalized_input_general = [t for t in normalized_input_general if t.casefold() not in banned]
+
+    # Keep all user-input general tags that are present in the cleaned general tags
+    # Match by casefolded comparison to handle case differences
+    user_input_tags_set = {t.casefold() for t in normalized_input_general}
+    user_tags_kept: List[str] = []
+    other_tags: List[str] = []
+    
+    for tag in cleaned_general:
+        if tag.casefold() in user_input_tags_set:
+            user_tags_kept.append(tag)
+        else:
+            other_tags.append(tag)
+
+    # Deduplicate user tags (in case of case variations) while preserving order
+    user_tags_kept = _dedupe_preserve_order(user_tags_kept)
+
+    # Randomly select from other tags to fill up to 10 total tags
+    # Use secrets module for cryptographically secure random selection
+    max_other_tags = max(0, 10 - len(user_tags_kept))
+    if len(other_tags) > max_other_tags:
+        selected_other_tags = secrets.SystemRandom().sample(other_tags, max_other_tags)
+    else:
+        selected_other_tags = other_tags
+
+    # Combine: user input tags first, then randomly selected other tags
+    cleaned_general = user_tags_kept + selected_other_tags
 
     # Finally, prepend character tags.
     final_tags = _dedupe_preserve_order(character_tags + cleaned_general)
@@ -393,6 +474,48 @@ async def manual_stage_run(payload: ManualStageRequest) -> Dict:
 
     if not final_tags:
         raise HTTPException(status_code=400, detail="All staged tags were removed (likely due to banned tags)")
+
+    # Extract original tags: all r34.nexus tags go into "general", user character tags into "character"
+    # Keep original underscore format from r34.nexus for original_tags
+    original_tags: Dict[str, List[str]] = {
+        "artist": [],
+        "series": [],
+        "general": [],
+        "character": [],
+    }
+    
+    # Put all tags from r34.nexus API into "general" (in original underscore format)
+    # All tag types (artist, series, general, character) from r34 go into "general"
+    for t in tags:
+        if not isinstance(t, dict):
+            continue
+        name = t.get("name")
+        if isinstance(name, str) and name.strip():
+            # Keep original underscore format from r34.nexus
+            tag_name = name.strip()
+            if tag_name not in original_tags["general"]:
+                original_tags["general"].append(tag_name)
+    
+    # Put user-provided character tags into "character" section
+    # Convert space format to underscore format to match r34.nexus format
+    # If the tag exists in r34.nexus tags, use the exact format from r34 (preserves casing)
+    for char_tag in input_character_tags:
+        if isinstance(char_tag, str) and char_tag.strip():
+            # Convert to underscore format for comparison
+            char_tag_underscore = char_tag.strip().replace(" ", "_")
+            # Check if this tag exists in r34.nexus tags (use r34 format if found)
+            found_in_r34 = False
+            for r34_tag in original_tags["general"]:
+                if r34_tag.lower() == char_tag_underscore.lower():
+                    # Use the exact format from r34.nexus
+                    if r34_tag not in original_tags["character"]:
+                        original_tags["character"].append(r34_tag)
+                    found_in_r34 = True
+                    break
+            if not found_in_r34:
+                # Tag not in r34, use converted underscore format
+                if not any(t.lower() == char_tag_underscore.lower() for t in original_tags["character"]):
+                    original_tags["character"].append(char_tag_underscore)
 
     return {
         "input_general_tags": general_tags,
@@ -406,6 +529,7 @@ async def manual_stage_run(payload: ManualStageRequest) -> Dict:
         "cleaned_general_tags": cleaned_general,
         "final_tags": final_tags,
         "final_prompt": final_prompt,
+        "original_tags": original_tags,
     }
 
 
@@ -413,24 +537,52 @@ class ManualSubmitRequest(BaseModel):
     final_tags: List[str] = Field(default_factory=list)
     image_count: int = Field(default=10, ge=1, le=50)
     seed_post_id: int | None = None
+    original_tags: Dict[str, List[str]] = Field(
+        default_factory=lambda: {"artist": [], "series": [], "general": [], "character": []}
+    )
 
 
 @app.post("/api/manual-runs/submit", tags=["api"])
 async def manual_submit_run(payload: ManualSubmitRequest) -> Dict:
     """
     Submit a staged manual run by creating a new Run in the workflow API.
-    Creates a QUEUED run with parameter_blob.image_count, letting the generator fill images.
+    Creates a QUEUED run with parameter_blob containing all required fields.
     """
     final_tags = _dedupe_preserve_order([t for t in payload.final_tags if isinstance(t, str)])
     if not final_tags:
         raise HTTPException(status_code=400, detail="final_tags cannot be empty")
 
-    parameter_blob: Dict[str, object] = {"image_count": int(payload.image_count), "source": "manual-reviewer"}
+    # Randomly determine orientation and assign width/height accordingly
+    # Portrait: 1024w x 1408h, Landscape: 1408w x 1024h
+    orientation = secrets.choice(["portrait", "landscape"])
+    if orientation == "portrait":
+        width = 1024
+        height = 1408
+    else:  # landscape
+        width = 1408
+        height = 1024
+
+    # Build parameter_blob with all required fields
+    parameter_blob: Dict[str, object] = {
+        "width": width,
+        "height": height,
+        "image_count": int(payload.image_count),
+        "orientation": orientation,
+        "prompt_array": final_tags,  # Array of tags
+        "original_tags": payload.original_tags,  # Organized by type (artist, series, general, character)
+        "prompt_string": ", ".join(final_tags),  # Comma-separated prompt string
+        "watermark_width": 400,
+        "source": "manual-reviewer",
+    }
+    
     if payload.seed_post_id is not None:
         parameter_blob["seed_post_id"] = int(payload.seed_post_id)
 
+    # Generate UUID for workflow_id
+    workflow_id = str(uuid.uuid4())
+
     run_create = {
-        "workflow_id": None,
+        "workflow_id": workflow_id,
         "prompt": ", ".join(final_tags),
         "parameter_blob": parameter_blob,
         "status": "queued",
