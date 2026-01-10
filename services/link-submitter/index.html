@@ -4,6 +4,26 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#0b1020" />
+    <script>
+      ;(() => {
+        try {
+          const stored = localStorage.getItem('theme')
+          const theme =
+            stored === 'light' || stored === 'dark'
+              ? stored
+              : window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
+                ? 'dark'
+                : 'light'
+
+          document.documentElement.dataset.theme = theme
+
+          const meta = document.querySelector('meta[name="theme-color"]')
+          if (meta) meta.setAttribute('content', theme === 'dark' ? '#0b1020' : '#f6f8ff')
+        } catch {
+          // ignore
+        }
+      })()
+    </script>
     <title>Link Submitter</title>
   </head>
   <body>
