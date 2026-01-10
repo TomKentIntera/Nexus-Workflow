@@ -631,7 +631,14 @@
                             </div>
                             <div style="flex:1; min-width:300px;">
                                 <div class="label">Final tags (submit uses this list)</div>
-                                <div class="muted" style="margin-top:6px;">You can remove any tag before submitting.</div>
+                                <div class="muted" style="margin-top:6px;">You can add or remove tags before submitting.</div>
+                                <div class="controls" style="margin-top:10px;">
+                                    <div class="suggest-wrap" style="flex:1;">
+                                        <input id="manualFinalInput" placeholder="Search general tags..." autocomplete="off" style="flex:1;" />
+                                        <div id="manualFinalSuggest" class="suggest-list"></div>
+                                    </div>
+                                    <button onclick="manualAddFinalTag()" style="background:#0d6efd; margin-left:8px;">Add</button>
+                                </div>
                                 <div id="manualFinalPills" class="tag-pills" style="margin-top:10px;"></div>
                                 <div class="inline-actions" style="margin-top:12px;">
                                     <button class="approve" id="manualSubmitBtn" onclick="manualSubmit()">Submit run</button>
@@ -1051,6 +1058,7 @@
         };
         let manualGeneralTimer = null;
         let manualCharacterTimer = null;
+        let manualFinalTimer = null;
 
         function manualNormalizeTag(raw) {
             const s = String(raw || '').trim();
@@ -1103,6 +1111,23 @@
             manualRender();
         }
 
+        function manualAddFinalTag(tagName = null) {
+            const el = document.getElementById('manualFinalInput');
+            if (!el) return;
+            // If tagName is provided (from suggestion click), use it; otherwise use input value
+            const tag = tagName ? String(tagName).trim() : String(el.value || '').trim();
+            if (!tag) return;
+            // Convert from r34.nexus format (tag_name) to space-separated format for final tags
+            // This matches how tags are displayed after staging
+            const tagWithSpaces = tag.replace(/_/g, ' ');
+            const key = tagWithSpaces.toLowerCase();
+            if (manualState.finalTags.some(x => x.toLowerCase() === key)) return;
+            manualState.finalTags.push(tagWithSpaces);
+            el.value = '';
+            manualHideSuggest('manualFinalSuggest');
+            manualRender();
+        }
+
         function manualRender() {
             manualRenderPills('manualGeneralPills', manualState.generalTags, (t) => manualRemoveTag('general', t));
             manualRenderPills('manualCharacterPills', manualState.characterTags, (t) => manualRemoveTag('character', t));
@@ -1120,6 +1145,8 @@
             manualState.originalTags = { "artist": [], "series": [], "general": [], "character": [] };
             document.getElementById('manualGeneralInput').value = '';
             document.getElementById('manualCharacterInput').value = '';
+            const finalInput = document.getElementById('manualFinalInput');
+            if (finalInput) finalInput.value = '';
             document.getElementById('manualPickedPostMeta').textContent = '';
             const img = document.getElementById('manualPickedPostImg');
             img.src = '';
@@ -1847,6 +1874,36 @@
             if (e.key === 'Enter') manualAddTyped('character');
             if (e.key === 'Escape') manualHideSuggest('manualCharacterSuggest');
         });
+        const manualFinalInputEl = document.getElementById('manualFinalInput');
+        if (manualFinalInputEl) {
+            manualFinalInputEl.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    manualAddFinalTag();
+                }
+                if (e.key === 'Escape') manualHideSuggest('manualFinalSuggest');
+            });
+            manualFinalInputEl.addEventListener('input', (e) => {
+                const q = e.target.value;
+                if (manualFinalTimer) clearTimeout(manualFinalTimer);
+                manualFinalTimer = setTimeout(async () => {
+                    // Search for general tags using r34 API
+                    const items = await manualFetchTagSuggestions(q, 'general');
+                    manualShowSuggest('manualFinalSuggest', items, (name) => {
+                        manualAddFinalTag(name);
+                    });
+                }, 180);
+            });
+            manualFinalInputEl.addEventListener('focus', async (e) => {
+                if (String(e.target.value || '').trim().length === 0) {
+                    // Show popular general tags when input is focused and empty
+                    const items = await manualFetchTagSuggestions('', 'general');
+                    manualShowSuggest('manualFinalSuggest', items, (name) => {
+                        manualAddFinalTag(name);
+                    });
+                }
+            });
+        }
         document.getElementById('manualGeneralInput').addEventListener('input', (e) => {
             const q = e.target.value;
             if (manualGeneralTimer) clearTimeout(manualGeneralTimer);
@@ -1895,8 +1952,10 @@
             // Close suggestion lists when clicking outside their inputs/wraps
             const generalWrap = document.getElementById('manualGeneralSuggest')?.parentElement;
             const characterWrap = document.getElementById('manualCharacterSuggest')?.parentElement;
+            const finalWrap = document.getElementById('manualFinalSuggest')?.parentElement;
             if (generalWrap && !generalWrap.contains(e.target)) manualHideSuggest('manualGeneralSuggest');
             if (characterWrap && !characterWrap.contains(e.target)) manualHideSuggest('manualCharacterSuggest');
+            if (finalWrap && !finalWrap.contains(e.target)) manualHideSuggest('manualFinalSuggest');
         });
         window.addEventListener('hashchange', onRoute);
         onRoute();
