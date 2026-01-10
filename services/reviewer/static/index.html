@@ -1161,17 +1161,21 @@
 
         async function manualFetchTagSuggestions(query, type) {
             const q = manualNormalizeTag(query);
+            const t = String(type || '').trim().toLowerCase();
+            // rule34.nexus "related" results skew heavily toward general tags; only show
+            // character suggestions when the user actually searches.
+            if (!q && t === 'character') return [];
             // Use backend proxy to avoid CORS issues
             // Backend handles: /api/tags/related when no query, /api/tags/search when query provided
             let url;
             if (!q) {
                 // No query - backend will use /api/tags/related
-                url = `/api/rule34/tags/search?limit=12`;
+                url = `/api/rule34/tags/search?limit=12${t ? `&type=${encodeURIComponent(t)}` : ''}`;
             } else if (q.length < 2) {
                 return []; // Need at least 2 characters
             } else {
                 // Has query - backend will use /api/tags/search with just the query
-                url = `/api/rule34/tags/search?query=${encodeURIComponent(q)}&limit=12`;
+                url = `/api/rule34/tags/search?query=${encodeURIComponent(q)}&limit=12${t ? `&type=${encodeURIComponent(t)}` : ''}`;
             }
             
             try {
