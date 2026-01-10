@@ -18,9 +18,16 @@ class Settings(BaseSettings):
     cors_allow_origins: str = "*"
     n8n_link_submission_webhook: Optional[HttpUrl] = None
 
-    # New Relic custom events (optional)
-    # If set, events are POSTed to this URL (useful for EU region endpoints).
-    # Otherwise, `new_relic_account_id` + `new_relic_insert_key` must be provided.
+    # New Relic telemetry (optional)
+    #
+    # Preferred (license key): we emit these "events" as New Relic Logs, using the Log API.
+    # - new_relic_license_key: New Relic account license key
+    # - new_relic_logs_url: optional override (e.g. EU region endpoint)
+    new_relic_license_key: Optional[str] = None
+    new_relic_logs_url: Optional[AnyHttpUrl] = None
+
+    # Legacy (insert key) support kept for compatibility. If present and license key is not set,
+    # we will send to the Insights Events endpoint.
     new_relic_events_url: Optional[AnyHttpUrl] = None
     new_relic_account_id: Optional[str] = None
     new_relic_insert_key: Optional[str] = None
