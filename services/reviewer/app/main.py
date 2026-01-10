@@ -137,6 +137,7 @@ class Rule34TagSearchResponse(BaseModel):
 @app.get("/api/rule34/tags/search", tags=["api"])
 async def rule34_tag_search(
     query: str | None = Query(default=None),
+    type: str | None = Query(default=None, description="Optional tag type filter (e.g. general, character)"),
     limit: int = Query(default=15, ge=1, le=50),
 ) -> Dict:
     """
@@ -148,6 +149,7 @@ async def rule34_tag_search(
     Returns the response from Rule34 API as-is.
     """
     q = (query or "").strip()
+    type_filter = (type or "").strip().lower() or None
     has_query = bool(q)
     
     try:
@@ -160,19 +162,35 @@ async def rule34_tag_search(
             if has_query:
                 # Has query - use /api/tags/search with just query and limit
                 params = {"query": q, "limit": limit}
+                if type_filter:
+                    # Forward to Rule34 API (it may ignore this) and also filter locally below.
+                    params["type"] = type_filter
                 endpoint = "/api/tags/search"
                 logger.info(f"Proxying to Rule34 API: {settings.rule34_base_url}{endpoint} with params: {params}")
                 res = await client.get(endpoint, params=params)
             else:
                 # No query - use /api/tags/related for top tags
                 params = {"limit": limit}
+                if type_filter:
+                    params["type"] = type_filter
                 endpoint = "/api/tags/related"
                 logger.info(f"Proxying to Rule34 API: {settings.rule34_base_url}{endpoint} with params: {params}")
                 res = await client.get(endpoint, params=params)
             
             res.raise_for_status()
-            # Return the response as-is from Rule34
-            return res.json()
+            payload = res.json()
+            # Apply type filtering locally (rule34.nexus does not reliably filter by query params).
+            if type_filter and isinstance(payload, dict) and isinstance(payload.get("data"), list):
+                filtered: list[dict] = []
+                for item in payload["data"]:
+                    if not isinstance(item, dict):
+                        continue
+                    item_type = str(item.get("type", "")).strip().lower()
+                    if item_type == type_filter:
+                        filtered.append(item)
+                payload = dict(payload)
+                payload["data"] = filtered[:limit]
+            return payload
         finally:
             await client.aclose()
     except httpx.ConnectError as exc:
@@ -225,6 +243,45 @@ class ManualStageRequest(BaseModel):
     character_tags: List[str] = Field(default_factory=list)
 
 
+def _post_has_all_required_tags(post_tags: object, required: List[str]) -> bool:
+    """
+    Best-effort check that a post's tags include all required tag names.
+    Uses case-insensitive matching and ignores tag type.
+    """
+    if not required:
+        return True
+    tags = post_tags if isinstance(post_tags, list) else []
+    present: set[str] = set()
+    for t in tags:
+        if not isinstance(t, dict):
+            continue
+        name = t.get("name")
+        if isinstance(name, str) and name.strip():
+            present.add(name.strip().casefold())
+    for req in required:
+        r = (req or "").strip()
+        if not r:
+            continue
+        if r.casefold() not in present:
+            return False
+    return True
+
+
+async def _fetch_banned_tags_casefolded() -> set[str]:
+    try:
+        async with _api_client() as client:
+            res = await client.get("/banned-tags")
+            res.raise_for_status()
+            data = res.json()
+            if not isinstance(data, list):
+                return set()
+            return {str(t).strip().casefold() for t in data if isinstance(t, str) and str(t).strip()}
+    except Exception as exc:
+        # Staging should still work even if API is temporarily unavailable.
+        logger.warning(f"Failed to fetch banned tags from API service: {type(exc).__name__}: {exc}")
+        return set()
+
+
 @app.post("/api/manual-runs/stage", tags=["api"])
 async def manual_stage_run(payload: ManualStageRequest) -> Dict:
     """
@@ -243,7 +300,7 @@ async def manual_stage_run(payload: ManualStageRequest) -> Dict:
     tags_query = " ".join(general_tags)
     try:
         async with _rule34_client() as client:
-            posts_res = await client.get("/api/posts", params={"tags": tags_query, "limit": 100})
+            posts_res = await client.get("/api/posts", params={"tags": tags_query, "limit": 200})
             posts_res.raise_for_status()
             posts_payload = posts_res.json()
     except httpx.HTTPError as exc:
@@ -253,30 +310,58 @@ async def manual_stage_run(payload: ManualStageRequest) -> Dict:
     if not isinstance(posts, list) or not posts:
         raise HTTPException(status_code=404, detail="No posts found for those general tags")
 
-    picked = secrets.choice(posts)
-    if not isinstance(picked, dict) or "id" not in picked:
+    # Pick a random post that actually contains all requested tags.
+    # rule34.nexus may return fallback results even for invalid/unknown tags, so verify via post detail.
+    candidates = [p for p in posts if isinstance(p, dict) and "id" in p]
+    if not candidates:
         raise HTTPException(status_code=502, detail="Unexpected Rule34 posts response shape")
 
-    post_id = int(picked["id"])
-    preview_url = None
-    try:
-        media = picked.get("media") if isinstance(picked.get("media"), dict) else None
-        if media:
-            preview_url = media.get("preview_url") or media.get("thumb_url")
-    except Exception:
+    max_attempts = min(25, len(candidates))
+    tried_ids: set[int] = set()
+    post_id: int | None = None
+    preview_url: str | None = None
+    post_obj: Dict | None = None
+
+    for _ in range(max_attempts):
+        picked = secrets.choice(candidates)
+        try:
+            pid = int(picked["id"])
+        except Exception:
+            continue
+        if pid in tried_ids:
+            continue
+        tried_ids.add(pid)
+
         preview_url = None
+        try:
+            media = picked.get("media") if isinstance(picked.get("media"), dict) else None
+            if media:
+                preview_url = media.get("preview_url") or media.get("thumb_url")
+        except Exception:
+            preview_url = None
 
-    try:
-        async with _rule34_client() as client:
-            detail_res = await client.get(f"/api/posts/{post_id}")
-            detail_res.raise_for_status()
-            detail_payload = detail_res.json()
-    except httpx.HTTPError as exc:
-        raise HTTPException(status_code=502, detail=f"Rule34 post detail failed: {exc}")
+        try:
+            async with _rule34_client() as client:
+                detail_res = await client.get(f"/api/posts/{pid}")
+                detail_res.raise_for_status()
+                detail_payload = detail_res.json()
+        except httpx.HTTPError:
+            continue
 
-    post_obj = detail_payload.get("data") if isinstance(detail_payload, dict) else None
-    if not isinstance(post_obj, dict):
-        raise HTTPException(status_code=502, detail="Unexpected Rule34 post detail response shape")
+        obj = detail_payload.get("data") if isinstance(detail_payload, dict) else None
+        if not isinstance(obj, dict):
+            continue
+
+        if _post_has_all_required_tags(obj.get("tags"), general_tags):
+            post_id = pid
+            post_obj = obj
+            break
+
+    if post_id is None or post_obj is None:
+        raise HTTPException(
+            status_code=404,
+            detail="No posts found that include all selected tags (tags may be invalid or too restrictive)",
+        )
 
     tags = post_obj.get("tags")
     if not isinstance(tags, list):
@@ -295,12 +380,23 @@ async def manual_stage_run(payload: ManualStageRequest) -> Dict:
     cleaned_general = [t for t in extracted_general if not _is_common_general_tag(t)]
     cleaned_general = _dedupe_preserve_order(cleaned_general)
 
+    # Remove any tags that are banned.
+    input_character_tags = list(character_tags)
+    banned = await _fetch_banned_tags_casefolded()
+    if banned:
+        cleaned_general = [t for t in cleaned_general if t.casefold() not in banned]
+        character_tags = [t for t in character_tags if t.casefold() not in banned]
+
+    # Finally, prepend character tags.
     final_tags = _dedupe_preserve_order(character_tags + cleaned_general)
     final_prompt = ", ".join(final_tags)
 
+    if not final_tags:
+        raise HTTPException(status_code=400, detail="All staged tags were removed (likely due to banned tags)")
+
     return {
         "input_general_tags": general_tags,
-        "input_character_tags": character_tags,
+        "input_character_tags": input_character_tags,
         "selected_post": {
             "id": post_id,
             "preview_url": preview_url,
