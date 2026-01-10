@@ -28,6 +28,7 @@ from ..schemas import (
 )
 from ..clients.minio_client import MinioConfigError, MinioPutError, put_object_bytes
 from ..config import get_settings
+from ..services.new_relic import emit_new_relic_event
 
 # New Relic custom event tracking
 try:
