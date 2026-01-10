@@ -18,6 +18,13 @@ class Settings(BaseSettings):
     cors_allow_origins: str = "*"
     n8n_link_submission_webhook: Optional[HttpUrl] = None
 
+    # New Relic custom events (optional)
+    # If set, events are POSTed to this URL (useful for EU region endpoints).
+    # Otherwise, `new_relic_account_id` + `new_relic_insert_key` must be provided.
+    new_relic_events_url: Optional[AnyHttpUrl] = None
+    new_relic_account_id: Optional[str] = None
+    new_relic_insert_key: Optional[str] = None
+
     # Tag filtering (used by n8n workflows)
     # - WF_BANNED_TAGS: comma/newline-separated or JSON list (e.g. '["English text","logo"]')
     # - WF_BANNED_TAGS_FILE: optional path to a file containing tags (one per line or comma-separated)
