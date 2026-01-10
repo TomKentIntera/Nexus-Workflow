@@ -39,7 +39,7 @@ _POSTING_WINDOW_START_HOUR = 12
 _POSTING_WINDOW_END_HOUR = 21
 
 # Max number of posts scheduled per day (within posting window).
-_DAILY_SCHEDULED_POST_LIMIT = 12
+_DAILY_SCHEDULED_POST_LIMIT = 5
 
 
 def _clamp_to_posting_window(candidate: datetime) -> datetime:
