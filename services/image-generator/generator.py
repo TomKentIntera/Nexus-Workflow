@@ -285,11 +285,20 @@ class HeartsyncModel:
             "generated_at": datetime.now().isoformat(),
             "image_path": image_path
         }
-        
-        # Save metadata as JSON file
+
+        # NOTE: Writing per-image metadata JSON files is disabled by default.
+        # Set WF_WRITE_METADATA_JSON=1 to re-enable.
+        write_metadata_json = str(os.environ.get("WF_WRITE_METADATA_JSON", "")).strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "y",
+            "on",
+        }
         metadata_path_json = os.path.join(save_dir, f"{timestamp}.json")
-        with open(metadata_path_json, 'w', encoding='utf-8') as f:
-            json.dump(metadata, f, indent=2, ensure_ascii=False)
+        if write_metadata_json:
+            with open(metadata_path_json, "w", encoding="utf-8") as f:
+                json.dump(metadata, f, indent=2, ensure_ascii=False)
         
         result = {"local_path": image_path}
         
@@ -324,8 +333,9 @@ class HeartsyncModel:
                 metadata["minio_uri"] = minio_uri
                 
                 # Update metadata file with MinIO URI
-                with open(metadata_path_json, 'w', encoding='utf-8') as f:
-                    json.dump(metadata, f, indent=2, ensure_ascii=False)
+                if write_metadata_json:
+                    with open(metadata_path_json, "w", encoding="utf-8") as f:
+                        json.dump(metadata, f, indent=2, ensure_ascii=False)
                 
                 print(f"✅ Image uploaded to MinIO: {minio_uri}")
                 
