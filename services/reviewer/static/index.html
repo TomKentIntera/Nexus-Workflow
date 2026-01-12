@@ -441,6 +441,11 @@
                     <div class="value" id="homeLastHour">—</div>
                     <div class="hint">Created in the last 60 minutes</div>
                 </div>
+                <div class="card">
+                    <div class="label">Posts Scheduled Until</div>
+                    <div class="value" id="homeScheduledUntil">—</div>
+                    <div class="hint">Date/time of the last scheduled post</div>
+                </div>
             </div>
             <div class="home-actions">
                 <button onclick="navigate('review')">Go to Review</button>
@@ -706,6 +711,23 @@
                 document.getElementById('homePosted').textContent = (s.posted_images ?? 0).toString();
                 document.getElementById('homeNeedReview').textContent = (s.runs_need_review ?? 0).toString();
                 document.getElementById('homeLastHour').textContent = (s.images_generated_last_hour ?? 0).toString();
+                
+                // Format and display last scheduled post time
+                const scheduledUntilEl = document.getElementById('homeScheduledUntil');
+                if (s.last_scheduled_post_time) {
+                    const scheduledDate = new Date(s.last_scheduled_post_time);
+                    scheduledUntilEl.textContent = scheduledDate.toLocaleString('en-US', {
+                        year: 'numeric',
+                        month: 'short',
+                        day: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        second: '2-digit',
+                        timeZoneName: 'short'
+                    });
+                } else {
+                    scheduledUntilEl.textContent = 'No posts scheduled';
+                }
             } catch (e) {
                 showStatus('Error loading summary: ' + e.message, 'error');
             }
