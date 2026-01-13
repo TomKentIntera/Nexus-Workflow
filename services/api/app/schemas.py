@@ -125,6 +125,7 @@ class ReviewerSummary(BaseModel):
     posted_images: int = 0
     runs_need_review: int = 0
     images_generated_last_hour: int = 0
+    posts_scheduled_until: Optional[datetime] = None
 
 
 class ImagesLastHourByMachine(BaseModel):
