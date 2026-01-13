@@ -55,6 +55,7 @@ def reviewer_summary(session: Session = Depends(get_session)) -> dict[str, Any]:
     Summary used by the reviewer UI homepage.
 
     - approved_images: images approved and awaiting posting
+    - posts_scheduled_until: latest scheduled_time among approved (non-posted) images
     - runs_need_review: runs with at least one GENERATED image (not yet approved/rejected/posted)
     - images_generated_last_hour: images created in the last 60 minutes
     - last_scheduled_post_time: datetime of the last scheduled post (max scheduled_time)

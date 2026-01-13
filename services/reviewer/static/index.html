@@ -114,7 +114,24 @@
             border-radius: 4px;
             margin-bottom: 24px;
         }
-        .run-info h2 { margin-bottom: 8px; color: #333; }
+        .run-info h2 { margin-bottom: 0; color: #333; }
+        .run-title-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 8px;
+        }
+        .run-title-actions {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        .run-title-actions button {
+            padding: 8px 12px;
+            font-size: 13px;
+            background: #6f42c1; /* purple */
+        }
         .run-info p { color: #666; margin: 4px 0; }
         .run-info-row {
             display: grid;
@@ -469,7 +486,12 @@
             </div>
             <div id="runInfo" style="display: none;">
                 <div class="run-info">
-                    <h2 id="runId"></h2>
+                    <div class="run-title-row">
+                        <h2 id="runId"></h2>
+                        <div class="run-title-actions">
+                            <button id="remixBtn" onclick="remixCurrentRun()" title="Remix this run into a new manual run" style="display:none;">Remix</button>
+                        </div>
+                    </div>
                     <div id="runPromptTags" class="tag-pills"></div>
                     <div class="run-info-row">
                         <div class="run-info-item">
@@ -666,6 +688,7 @@
     <script>
         let selectedImages = new Set();
         let currentRunId = null;
+        let currentRun = null;
         let imageMap = {};
         const postedState = { limit: 48, offset: 0, total: 0 };
         const scheduledState = { limit: 48, offset: 0, total: 0 };
@@ -1337,6 +1360,127 @@
             }
         }
 
+        function safeJsonParse(text) {
+            try {
+                return JSON.parse(text);
+            } catch (_) {
+                return null;
+            }
+        }
+
+        function getRunParameterBlob(run) {
+            const pb = run?.parameter_blob;
+            if (!pb) return null;
+            if (typeof pb === 'object') return pb;
+            if (typeof pb === 'string') {
+                const parsed = safeJsonParse(pb);
+                return (parsed && typeof parsed === 'object') ? parsed : null;
+            }
+            return null;
+        }
+
+        function dedupeCasefold(values) {
+            const out = [];
+            const seen = new Set();
+            (Array.isArray(values) ? values : []).forEach(v => {
+                const s = String(v || '').trim();
+                if (!s) return;
+                const key = s.toLowerCase();
+                if (seen.has(key)) return;
+                seen.add(key);
+                out.push(s);
+            });
+            return out;
+        }
+
+        function tagToSpaceFormat(tag) {
+            // Final tags in manual flow are shown as "tag name" (spaces), not "tag_name".
+            return String(tag || '').trim().replaceAll('_', ' ').replaceAll(/\s+/g, ' ').trim();
+        }
+
+        function extractRunTagsForRemix(run) {
+            const pb = getRunParameterBlob(run);
+            let tags = [];
+
+            // Prefer prompt_array if present (manual-reviewer sets this).
+            const pa = pb?.prompt_array;
+            if (Array.isArray(pa)) {
+                tags = pa.map(tagToSpaceFormat);
+            } else if (typeof run?.prompt === 'string' && run.prompt.trim()) {
+                // Fallback: split prompt like "a, b, c"
+                tags = run.prompt.split(',').map(s => tagToSpaceFormat(s));
+            }
+
+            // Remove empties + dedupe
+            tags = tags.filter(t => t && t.trim().length > 0);
+            return dedupeCasefold(tags);
+        }
+
+        function extractOriginalTagsForRemix(run) {
+            const pb = getRunParameterBlob(run);
+            const ot = pb?.original_tags;
+            if (ot && typeof ot === 'object') {
+                return {
+                    artist: Array.isArray(ot.artist) ? ot.artist.map(x => String(x)) : [],
+                    series: Array.isArray(ot.series) ? ot.series.map(x => String(x)) : [],
+                    general: Array.isArray(ot.general) ? ot.general.map(x => String(x)) : [],
+                    character: Array.isArray(ot.character) ? ot.character.map(x => String(x)) : [],
+                };
+            }
+            return { artist: [], series: [], general: [], character: [] };
+        }
+
+        function remixCurrentRun() {
+            if (!currentRun) {
+                showStatus('No run loaded to remix yet.', 'error');
+                return;
+            }
+
+            const pb = getRunParameterBlob(currentRun);
+            const finalTags = extractRunTagsForRemix(currentRun);
+            if (!finalTags.length) {
+                showStatus('Could not extract tags from this run to remix.', 'error');
+                return;
+            }
+
+            // Best-effort: use original_tags.character (manual-reviewer stores it) to seed character tags.
+            const originalTags = extractOriginalTagsForRemix(currentRun);
+            const charFromOriginal = dedupeCasefold((originalTags.character || []).map(tagToSpaceFormat));
+            const charSet = new Set(charFromOriginal.map(t => t.toLowerCase()));
+
+            // Seed "general" tag picks as final minus character (if we can identify any).
+            const generalSpace = finalTags.filter(t => !charSet.has(t.toLowerCase()));
+
+            // Manual UI stores search tags with underscores.
+            const generalUnderscore = dedupeCasefold(generalSpace.map(t => manualNormalizeTag(t)));
+            const characterUnderscore = dedupeCasefold(charFromOriginal.map(t => manualNormalizeTag(t)));
+
+            manualReset();
+            manualState.finalTags = finalTags;
+            manualState.generalTags = generalUnderscore;
+            manualState.characterTags = characterUnderscore;
+            manualState.originalTags = originalTags;
+            manualState.seedPostId = (pb && pb.seed_post_id != null) ? pb.seed_post_id : null;
+
+            // Image count: prefer parameter_blob.image_count if present
+            const imageCountEl = document.getElementById('manualImageCount');
+            const count = (pb && typeof pb.image_count === 'number') ? pb.image_count : (pb && typeof pb.image_count === 'string' ? parseInt(pb.image_count, 10) : null);
+            if (imageCountEl && count && Number.isFinite(count)) {
+                imageCountEl.value = String(Math.max(1, Math.min(50, count)));
+            }
+
+            // Show provenance in the staged meta area (no preview image available here).
+            const meta = document.getElementById('manualPickedPostMeta');
+            if (meta) {
+                const rid = String(currentRun?.id || '').trim();
+                meta.innerHTML = rid ? `Remix from run: <strong>${escapeHtml(rid)}</strong>` : 'Remix from run';
+            }
+
+            manualRender();
+            navigate('manual');
+            showStatus('Remix loaded. You can edit final tags, or adjust general/character tags and click “Stage run” to re-stage.', 'success');
+        }
+
         function convertUrl(url) {
             if (url.startsWith('s3://')) {
                 // Convert s3://bucket/path to /api/images/bucket/path
@@ -1436,16 +1580,23 @@
         async function loadRun(runId) {
             if (!runId) {
                 document.getElementById('runInfo').style.display = 'none';
+                currentRun = null;
+                const remixBtn = document.getElementById('remixBtn');
+                if (remixBtn) remixBtn.style.display = 'none';
                 return;
             }
             currentRunId = runId;
+            currentRun = null;
             selectedImages.clear();
             document.getElementById('loading').style.display = 'block';
             try {
                 const response = await fetch(`/api/runs/${runId}`);
                 const run = await response.json();
+                currentRun = run;
                 
                 document.getElementById('runId').textContent = `Run ${run.id.substring(0, 8)}...`;
+                const remixBtn = document.getElementById('remixBtn');
+                if (remixBtn) remixBtn.style.display = 'inline-block';
                 renderPromptTags(run.prompt);
                 document.getElementById('runStatus').textContent = run.status;
                 document.getElementById('imageCount').textContent = run.images.length;
