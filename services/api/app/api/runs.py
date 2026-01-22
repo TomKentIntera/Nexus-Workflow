@@ -72,7 +72,20 @@ def list_runs(
     status_filter: RunStatus | None = Query(default=None, alias="status"),
     session: Session = Depends(get_session),
 ) -> RunList:
-    stmt = select(Run).options(selectinload(Run.images)).order_by(Run.created_at.desc())
+    needs_review = (
+        select(RunImage.id)
+        .where(
+            RunImage.run_id == Run.id,
+            RunImage.status == RunImageStatus.GENERATED,
+        )
+        .exists()
+    )
+    stmt = (
+        select(Run)
+        .options(selectinload(Run.images))
+        .where(needs_review, Run.status != RunStatus.POSTED)
+        .order_by(Run.created_at.desc())
+    )
     if status_filter:
         stmt = stmt.where(Run.status == status_filter)
     runs: Sequence[Run] = session.execute(stmt).unique().scalars().all()
