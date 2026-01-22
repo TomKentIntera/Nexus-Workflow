@@ -4,7 +4,7 @@ import random
 from datetime import date, datetime, time, timedelta
 from typing import List, Sequence
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
@@ -16,11 +16,13 @@ from ..schemas import (
     RunImageApprovalRequest,
     RunImageApprovalResponse,
     RunImageCreate,
+    RunImageList,
+    RunImageListItem,
+    RunLeaseResponse,
     RunList,
     RunRead,
     RunUpdateStatus,
 )
-from ..services.webhooks import enqueue_run_image_approval_webhook
 
 router = APIRouter(prefix="/runs", tags=["runs"])
 
@@ -176,6 +178,147 @@ def list_runs(
     return RunList(runs=runs)
 
 
+@router.post("/lease", response_model=None, status_code=status.HTTP_200_OK)
+def lease_run(session: Session = Depends(get_session)):
+    """
+    Lease the next queued run for image generation.
+    
+    Atomically claims a queued run by:
+    - Finding the oldest QUEUED run with no active lease
+    - Setting leased_until to now + 2 hours
+    - Setting status to GENERATING
+    - Returns 200 with run details, or 204 if no run available
+    """
+    now = datetime.utcnow()
+    lease_duration = timedelta(hours=2)
+    lease_until = now + lease_duration
+    
+    # Find the oldest QUEUED run with no active lease
+    stmt = (
+        select(Run)
+        .where(
+            Run.status == RunStatus.QUEUED,
+            (Run.leased_until.is_(None)) | (Run.leased_until < now),
+        )
+        .order_by(Run.created_at.asc())
+        .limit(1)
+    )
+    
+    run = session.execute(stmt).scalar_one_or_none()
+    
+    if not run:
+        # No run available - return 204
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+    
+    # Lease the run
+    run.status = RunStatus.GENERATING
+    run.leased_until = lease_until
+    run.updated_at = now
+    session.add(run)
+    session.commit()
+    session.refresh(run)
+    
+    # Count existing images
+    images_stmt = select(func.count()).select_from(RunImage).where(RunImage.run_id == run.id)
+    generated_images = int(session.execute(images_stmt).scalar_one() or 0)
+    
+    # Determine image_count from parameter_blob or default to 1
+    image_count = 1
+    if run.parameter_blob and isinstance(run.parameter_blob, dict):
+        image_count = run.parameter_blob.get("image_count", 1)
+    
+    remaining_images = max(0, image_count - generated_images)
+    
+    return RunLeaseResponse(
+        id=run.id,
+        workflow_id=run.workflow_id,
+        prompt=run.prompt,
+        parameter_blob=run.parameter_blob,
+        image_count=image_count,
+        generated_images=generated_images,
+        remaining_images=remaining_images,
+        leased_until=lease_until,
+    )
+
+
+@router.get("/images", response_model=RunImageList)
+def list_run_images(
+    status: RunImageStatus | None = Query(default=None, alias="status"),
+    scheduled_only: bool = Query(default=False),
+    limit: int = Query(default=48, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    session: Session = Depends(get_session),
+) -> RunImageList:
+    """
+    List run images with optional filtering.
+    
+    - status: Filter by image status (e.g., POSTED, APPROVED, GENERATED)
+    - scheduled_only: Only return images with scheduled_time set
+    - limit: Number of images to return (1-200)
+    - offset: Pagination offset
+    """
+    stmt = (
+        select(RunImage, Run.prompt, Run.created_at.label("run_created_at"))
+        .join(Run, Run.id == RunImage.run_id)
+        .order_by(RunImage.created_at.desc())
+    )
+    
+    # Apply filters
+    if scheduled_only:
+        stmt = stmt.where(RunImage.scheduled_time.is_not(None))
+    
+    if status:
+        stmt = stmt.where(RunImage.status == status)
+    
+    # Get total count (before pagination)
+    count_stmt = (
+        select(func.count())
+        .select_from(RunImage)
+        .join(Run, Run.id == RunImage.run_id)
+    )
+    if scheduled_only:
+        count_stmt = count_stmt.where(RunImage.scheduled_time.is_not(None))
+    if status:
+        count_stmt = count_stmt.where(RunImage.status == status)
+    total = int(session.execute(count_stmt).scalar_one() or 0)
+    
+    # Apply pagination
+    stmt = stmt.limit(limit).offset(offset)
+    
+    # Execute query
+    results = session.execute(stmt).all()
+    
+    # Build response
+    images = []
+    for image, prompt, run_created_at in results:
+        images.append(
+            RunImageListItem(
+                id=image.id,
+                run_id=image.run_id,
+                ordinal=image.ordinal,
+                asset_uri=image.asset_uri,
+                thumb_uri=image.thumb_uri,
+                generated_by_machine_id=image.generated_by_machine_id,
+                status=image.status,
+                notes=image.notes,
+                fanvue_uuid=image.fanvue_uuid,
+                r34_uuid=image.r34_uuid,
+                twitter_posted_time=image.twitter_posted_time,
+                created_at=image.created_at,
+                run_created_at=run_created_at,
+                prompt=prompt,
+                scheduled_time=image.scheduled_time,
+            )
+        )
+    
+    return RunImageList(
+        images=images,
+        total=total,
+        limit=limit,
+        offset=offset,
+    )
+
+
 @router.get("/{run_id}", response_model=RunRead)
 def get_run(run_id: str, session: Session = Depends(get_session)) -> Run:
     return _get_run(session, run_id)
@@ -224,7 +367,6 @@ def approve_run_image(
     run_id: str,
     image_id: str,
     payload: RunImageApprovalRequest,
-    background_tasks: BackgroundTasks,
     session: Session = Depends(get_session),
 ) -> RunImageApprovalResponse:
     image = _get_run_image(session, run_id, image_id)
@@ -250,10 +392,8 @@ def approve_run_image(
     session.commit()
     session.refresh(approval)
 
-    background_tasks.add_task(enqueue_run_image_approval_webhook, approval.id)
-
     return RunImageApprovalResponse(
         approval_id=approval.id,
         image_id=image.id,
         webhook_status=approval.webhook_status.value,
-    )*** End of File
+    )
