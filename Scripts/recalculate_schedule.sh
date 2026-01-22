@@ -3,64 +3,100 @@ set -euo pipefail
 
 # Recalculate scheduled_time for approved images.
 #
-# Update the configuration values below, then run:
+# Configuration is read from the reviewer app .env:
+#   REVIEWER_IMAGES_PER_DAY
+#   REVIEWER_POSTING_WINDOW_START
+#   REVIEWER_POSTING_WINDOW_END
+#
+# Run:
 #   ./Scripts/recalculate_schedule.sh
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-# --- Configuration ---
-IMAGES_PER_DAY=8
-WINDOW_START="09:00:00" # HH:MM or HH:MM:SS
-WINDOW_END="21:00:00"   # HH:MM or HH:MM:SS
-# Set START_DATE to override the first scheduled date (YYYY-MM-DD).
-START_DATE=""
-
 # Optional: status value for approved images (matches DB enum).
 APPROVED_STATUS="APPROVED"
 
+REVIEWER_ENV_FILE="${ROOT_DIR}/services/reviewer/.env"
 API_ENV_FILE="${ROOT_DIR}/services/api/.env"
 
-if [[ -z "${WF_DATABASE_URL:-}" && -f "${API_ENV_FILE}" ]]; then
-  # Load WF_DATABASE_URL from services/api/.env if present.
-  wf_line="$(grep -E '^WF_DATABASE_URL=' "${API_ENV_FILE}" | head -n 1 || true)"
-  if [[ -n "${wf_line}" ]]; then
-    WF_DATABASE_URL="${wf_line#WF_DATABASE_URL=}"
-    WF_DATABASE_URL="${WF_DATABASE_URL%\"}"
-    WF_DATABASE_URL="${WF_DATABASE_URL#\"}"
-    WF_DATABASE_URL="${WF_DATABASE_URL%\'}"
-    WF_DATABASE_URL="${WF_DATABASE_URL#\'}"
-    export WF_DATABASE_URL
+load_env_value() {
+  local key="$1"
+  local file="$2"
+  if [[ -n "${!key:-}" ]]; then
+    return 0
   fi
+  if [[ ! -f "${file}" ]]; then
+    return 0
+  fi
+  local line=""
+  line="$(grep -E "^${key}=" "${file}" | head -n 1 || true)"
+  if [[ -z "${line}" ]]; then
+    return 0
+  fi
+  local value="${line#${key}=}"
+  value="${value%\"}"
+  value="${value#\"}"
+  value="${value%\'}"
+  value="${value#\'}"
+  printf -v "${key}" "%s" "${value}"
+  export "${key}"
+}
+
+if ! command -v mysql >/dev/null 2>&1; then
+  echo "mysql client not found. Install it or run from a machine with mysql CLI." >&2
+  exit 1
 fi
+
+load_env_value "REVIEWER_IMAGES_PER_DAY" "${REVIEWER_ENV_FILE}"
+load_env_value "REVIEWER_POSTING_WINDOW_START" "${REVIEWER_ENV_FILE}"
+load_env_value "REVIEWER_POSTING_WINDOW_END" "${REVIEWER_ENV_FILE}"
+
+if [[ -z "${WF_DATABASE_URL:-}" && -f "${API_ENV_FILE}" ]]; then
+  load_env_value "WF_DATABASE_URL" "${API_ENV_FILE}"
+fi
+
+images_per_day="${REVIEWER_IMAGES_PER_DAY:-}"
+window_start="${REVIEWER_POSTING_WINDOW_START:-}"
+window_end="${REVIEWER_POSTING_WINDOW_END:-}"
 
 if [[ -z "${WF_DATABASE_URL:-}" ]]; then
   echo "WF_DATABASE_URL is not set. Export it or add it to services/api/.env." >&2
   exit 1
 fi
 
-if [[ "${IMAGES_PER_DAY}" -le 0 ]]; then
-  echo "IMAGES_PER_DAY must be > 0." >&2
+if [[ -z "${images_per_day}" ]]; then
+  echo "REVIEWER_IMAGES_PER_DAY is not set in services/reviewer/.env." >&2
   exit 1
 fi
 
-if [[ ! "${WINDOW_START}" =~ ^[0-2][0-9]:[0-5][0-9](:[0-5][0-9])?$ ]]; then
-  echo "WINDOW_START must be HH:MM or HH:MM:SS." >&2
+if [[ -z "${window_start}" ]]; then
+  echo "REVIEWER_POSTING_WINDOW_START is not set in services/reviewer/.env." >&2
   exit 1
 fi
 
-if [[ ! "${WINDOW_END}" =~ ^[0-2][0-9]:[0-5][0-9](:[0-5][0-9])?$ ]]; then
-  echo "WINDOW_END must be HH:MM or HH:MM:SS." >&2
+if [[ -z "${window_end}" ]]; then
+  echo "REVIEWER_POSTING_WINDOW_END is not set in services/reviewer/.env." >&2
   exit 1
 fi
 
-if [[ "${WINDOW_END}" <= "${WINDOW_START}" ]]; then
-  echo "WINDOW_END must be later than WINDOW_START." >&2
+if [[ "${images_per_day}" -le 0 ]]; then
+  echo "REVIEWER_IMAGES_PER_DAY must be > 0." >&2
   exit 1
 fi
 
-if [[ -n "${START_DATE}" && ! "${START_DATE}" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
-  echo "START_DATE must be YYYY-MM-DD when set." >&2
+if [[ ! "${window_start}" =~ ^[0-2][0-9]:[0-5][0-9](:[0-5][0-9])?$ ]]; then
+  echo "REVIEWER_POSTING_WINDOW_START must be HH:MM or HH:MM:SS." >&2
+  exit 1
+fi
+
+if [[ ! "${window_end}" =~ ^[0-2][0-9]:[0-5][0-9](:[0-5][0-9])?$ ]]; then
+  echo "REVIEWER_POSTING_WINDOW_END must be HH:MM or HH:MM:SS." >&2
+  exit 1
+fi
+
+if [[ "${window_end}" <= "${window_start}" ]]; then
+  echo "REVIEWER_POSTING_WINDOW_END must be later than START." >&2
   exit 1
 fi
 
@@ -108,23 +144,19 @@ if [[ "${scheduled_count}" -eq 0 ]]; then
   exit 0
 fi
 
-if [[ -n "${START_DATE}" ]]; then
-  start_date="${START_DATE}"
-fi
-
 if [[ -z "${start_date}" || "${start_date}" == "NULL" ]]; then
   echo "Unable to determine start date from scheduled images." >&2
   exit 1
 fi
 
 echo "Found ${scheduled_count} approved scheduled images."
-echo "Scheduling ${IMAGES_PER_DAY}/day between ${WINDOW_START}-${WINDOW_END}."
+echo "Scheduling ${images_per_day}/day between ${window_start}-${window_end}."
 echo "Start date: ${start_date}"
 
 mysql "${mysql_args[@]}" <<SQL
-SET @images_per_day := ${IMAGES_PER_DAY};
-SET @window_start := '${WINDOW_START}';
-SET @window_end := '${WINDOW_END}';
+SET @images_per_day := ${images_per_day};
+SET @window_start := '${window_start}';
+SET @window_end := '${window_end}';
 SET @start_date := '${start_date}';
 SET @interval_seconds := TIMESTAMPDIFF(
   SECOND,
