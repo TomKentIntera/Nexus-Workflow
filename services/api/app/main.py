@@ -13,6 +13,7 @@ from .api.autotag import router as autotag_router
 from .api.allowed_search_tags import router as allowed_search_tags_router
 from .api.banned_tags import router as banned_tags_router
 from .api.links import router as links_router
+from .api.metrics import router as metrics_router
 from .api.platform import router as platform_router
 from .api.runs import router as runs_router
 from .api.stats import router as stats_router
@@ -129,3 +130,4 @@ app.include_router(allowed_search_tags_router)
 app.include_router(banned_tags_router)
 app.include_router(links_router)
 app.include_router(stats_router)
+app.include_router(metrics_router)
