@@ -18,6 +18,21 @@ class Settings(BaseSettings):
     cors_allow_origins: str = "*"
     n8n_link_submission_webhook: Optional[HttpUrl] = None
 
+    # Posting schedule settings
+    posting_window_start: str = Field(
+        "12:00:00", description="Posting window start (HH:MM or HH:MM:SS)"
+    )
+    posting_window_end: str = Field(
+        "21:00:00", description="Posting window end (HH:MM or HH:MM:SS)"
+    )
+    max_posts_per_day: int = Field(5, ge=1, description="Maximum posts per day")
+    schedule_delay_min: int = Field(
+        30, ge=0, description="Minimum minutes after last post"
+    )
+    schedule_delay_max: int = Field(
+        90, ge=0, description="Maximum minutes after last post"
+    )
+
     # New Relic telemetry (optional)
     #
     # Preferred (license key): we emit these "events" as New Relic Logs, using the Log API.

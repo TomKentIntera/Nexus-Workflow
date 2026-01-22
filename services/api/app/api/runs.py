@@ -1,12 +1,14 @@
 from __future__ import annotations
 
-from datetime import datetime
+import random
+from datetime import date, datetime, time, timedelta
 from typing import List, Sequence
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
+from ..config import get_settings
 from ..database import get_session
 from ..models import Run, RunImage, RunImageApproval, RunImageStatus, RunStatus
 from ..schemas import (
@@ -40,6 +42,88 @@ def _get_run_image(session: Session, run_id: str, image_id: str) -> RunImage:
     if not result:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run image not found")
     return result
+
+
+def _parse_window_time(value: str, label: str) -> time:
+    try:
+        return time.fromisoformat(value)
+    except ValueError as exc:
+        raise ValueError(
+            f"{label} must be HH:MM or HH:MM:SS (got '{value}')."
+        ) from exc
+
+
+def _count_scheduled_for_day(session: Session, day: date) -> int:
+    stmt = (
+        select(func.count())
+        .select_from(RunImage)
+        .where(
+            RunImage.scheduled_time.is_not(None),
+            RunImage.status.in_([RunImageStatus.APPROVED, RunImageStatus.POSTED]),
+            func.date(RunImage.scheduled_time) == day,
+        )
+    )
+    return int(session.execute(stmt).scalar_one() or 0)
+
+
+def _calculate_scheduled_time(session: Session) -> datetime:
+    settings = get_settings()
+    window_start = _parse_window_time(settings.posting_window_start, "WF_POSTING_WINDOW_START")
+    window_end = _parse_window_time(settings.posting_window_end, "WF_POSTING_WINDOW_END")
+
+    if window_end <= window_start:
+        raise ValueError("WF_POSTING_WINDOW_END must be later than WF_POSTING_WINDOW_START.")
+
+    max_posts_per_day = settings.max_posts_per_day
+    if max_posts_per_day <= 0:
+        raise ValueError("WF_MAX_POSTS_PER_DAY must be > 0.")
+
+    delay_min = settings.schedule_delay_min
+    delay_max = settings.schedule_delay_max
+    if delay_min < 0 or delay_max < 0:
+        raise ValueError("Schedule delays must be >= 0 minutes.")
+    if delay_min > delay_max:
+        raise ValueError("WF_SCHEDULE_DELAY_MIN must be <= WF_SCHEDULE_DELAY_MAX.")
+
+    last_stmt = (
+        select(func.max(RunImage.scheduled_time))
+        .select_from(RunImage)
+        .where(
+            RunImage.scheduled_time.is_not(None),
+            RunImage.status.in_([RunImageStatus.APPROVED, RunImageStatus.POSTED]),
+        )
+    )
+    last_scheduled = session.execute(last_stmt).scalar_one()
+
+    now = datetime.utcnow()
+    base_time = max(last_scheduled, now) if last_scheduled else now
+
+    delay_minutes = delay_min if delay_min == delay_max else random.randint(delay_min, delay_max)
+    candidate = base_time + timedelta(minutes=delay_minutes)
+
+    def _window_for(day: date) -> tuple[datetime, datetime]:
+        return datetime.combine(day, window_start), datetime.combine(day, window_end)
+
+    day = candidate.date()
+    window_start_dt, window_end_dt = _window_for(day)
+    if candidate < window_start_dt:
+        candidate = window_start_dt
+    if candidate > window_end_dt:
+        day = day + timedelta(days=1)
+        candidate = datetime.combine(day, window_start)
+
+    while True:
+        if _count_scheduled_for_day(session, day) < max_posts_per_day:
+            window_start_dt, window_end_dt = _window_for(day)
+            if candidate < window_start_dt:
+                candidate = window_start_dt
+            if candidate > window_end_dt:
+                day = day + timedelta(days=1)
+                candidate = datetime.combine(day, window_start)
+                continue
+            return candidate
+        day = day + timedelta(days=1)
+        candidate = datetime.combine(day, window_start)
 
 
 @router.post("", response_model=RunRead, status_code=status.HTTP_201_CREATED)
@@ -135,6 +219,13 @@ def approve_run_image(
     image.notes = payload.notes or image.notes
     image.run.updated_at = datetime.utcnow()
     image.run.status = RunStatus.APPROVED
+    if image.scheduled_time is None:
+        try:
+            image.scheduled_time = _calculate_scheduled_time(session)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)
+            ) from exc
 
     approval = RunImageApproval(
         run_image=image,

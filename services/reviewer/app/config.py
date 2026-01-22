@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import Optional
 
 from pydantic import Field
 from pydantic_settings import BaseSettings
@@ -12,15 +11,6 @@ class Settings(BaseSettings):
     rule34_base_url: str = Field("https://rule34.nexus", description="Rule34 Nexus base URL")
     default_approver: str = Field("reviewer", description="Fallback approver name")
     request_timeout: float = Field(15.0, description="HTTP timeout in seconds")
-    images_per_day: Optional[int] = Field(
-        None, description="Images to post per day (scheduler config)"
-    )
-    posting_window_start: Optional[str] = Field(
-        None, description="Posting window start (HH:MM or HH:MM:SS)"
-    )
-    posting_window_end: Optional[str] = Field(
-        None, description="Posting window end (HH:MM or HH:MM:SS)"
-    )
 
     class Config:
         env_prefix = "REVIEWER_"
