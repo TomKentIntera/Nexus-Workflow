@@ -49,3 +49,4 @@ Cypress.Commands.add('uploadImageFromUrl', (imageUrl, fileInputSelector) => {
 });
 
 
+

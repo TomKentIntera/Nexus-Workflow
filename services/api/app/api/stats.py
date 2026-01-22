@@ -50,15 +50,13 @@ def images_per_hour(
 
 
 @router.get("/reviewer-summary")
-def reviewer_summary(session: Session = Depends(get_session)) -> dict[str, Any]:
+def reviewer_summary(session: Session = Depends(get_session)) -> dict[str, int]:
     """
     Summary used by the reviewer UI homepage.
 
     - approved_images: images approved and awaiting posting
-    - posts_scheduled_until: latest scheduled_time among approved (non-posted) images
     - runs_need_review: runs with at least one GENERATED image (not yet approved/rejected/posted)
     - images_generated_last_hour: images created in the last 60 minutes
-    - last_scheduled_post_time: datetime of the last scheduled post (max scheduled_time)
     """
     now = datetime.utcnow()
     cutoff = now - timedelta(hours=1)
@@ -92,23 +90,11 @@ def reviewer_summary(session: Session = Depends(get_session)) -> dict[str, Any]:
     )
     images_generated_last_hour = int(session.execute(images_last_hour_stmt).scalar_one() or 0)
 
-    # Get the last scheduled post time (max scheduled_time where status is APPROVED)
-    last_scheduled_stmt = (
-        select(func.max(RunImage.scheduled_time))
-        .select_from(RunImage)
-        .where(
-            RunImage.scheduled_time.is_not(None),
-            RunImage.status == RunImageStatus.APPROVED
-        )
-    )
-    last_scheduled_post_time = session.execute(last_scheduled_stmt).scalar_one()
-
     return {
         "approved_images": approved_images,
         "posted_images": posted_images,
         "runs_need_review": runs_need_review,
         "images_generated_last_hour": images_generated_last_hour,
-        "last_scheduled_post_time": last_scheduled_post_time.isoformat() if last_scheduled_post_time else None,
     }
 
 

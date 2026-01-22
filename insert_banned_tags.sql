@@ -47,3 +47,4 @@ INSERT IGNORE INTO banned_tags (id, tag, created_at, updated_at) VALUES
 (UUID(), 'reading', NOW(), NOW()),
 (UUID(), 'picture frame', NOW(), NOW());
 
+
