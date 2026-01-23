@@ -83,6 +83,14 @@ class RunImage(Base):
     )
 
 
+class ImageGenerationStat(Base):
+    __tablename__ = "image_generation_stats"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+    machine_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+
 class RunImageApproval(Base):
     __tablename__ = "run_image_approvals"
 

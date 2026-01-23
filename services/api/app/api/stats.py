@@ -8,7 +8,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..database import get_session
-from ..models import Run, RunImage, RunImageStatus, RunStatus
+from ..models import ImageGenerationStat, Run, RunImage, RunImageStatus, RunStatus
 
 router = APIRouter(prefix="/stats", tags=["stats"])
 
@@ -26,15 +26,15 @@ def images_per_hour(
     cutoff = datetime.utcnow() - timedelta(hours=hours)
 
     # MySQL hour bucket
-    hour_bucket = func.date_format(RunImage.created_at, "%Y-%m-%d %H:00:00")
+    hour_bucket = func.date_format(ImageGenerationStat.generated_at, "%Y-%m-%d %H:00:00")
     stmt = (
         select(
             hour_bucket.label("hour"),
-            RunImage.generated_by_machine_id.label("machine_id"),
+            ImageGenerationStat.machine_id.label("machine_id"),
             func.count().label("count"),
         )
-        .where(RunImage.created_at >= cutoff)
-        .group_by(hour_bucket, RunImage.generated_by_machine_id)
+        .where(ImageGenerationStat.generated_at >= cutoff)
+        .group_by(hour_bucket, ImageGenerationStat.machine_id)
         .order_by(hour_bucket.asc())
     )
 
@@ -86,8 +86,8 @@ def reviewer_summary(session: Session = Depends(get_session)) -> dict[str, Any]:
 
     images_last_hour_stmt = (
         select(func.count())
-        .select_from(RunImage)
-        .where(RunImage.created_at >= cutoff)
+        .select_from(ImageGenerationStat)
+        .where(ImageGenerationStat.generated_at >= cutoff)
     )
     images_generated_last_hour = int(session.execute(images_last_hour_stmt).scalar_one() or 0)
 
@@ -124,11 +124,11 @@ def images_last_hour_by_machine(session: Session = Depends(get_session)) -> dict
     cutoff = datetime.utcnow() - timedelta(hours=1)
     stmt = (
         select(
-            RunImage.generated_by_machine_id.label("machine_id"),
+            ImageGenerationStat.machine_id.label("machine_id"),
             func.count().label("count"),
         )
-        .where(RunImage.created_at >= cutoff)
-        .group_by(RunImage.generated_by_machine_id)
+        .where(ImageGenerationStat.generated_at >= cutoff)
+        .group_by(ImageGenerationStat.machine_id)
         .order_by(func.count().desc())
     )
     rows = session.execute(stmt).all()
