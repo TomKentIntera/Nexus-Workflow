@@ -4,15 +4,17 @@ import random
 from datetime import date, datetime, time, timedelta
 from typing import List, Sequence
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, Response, UploadFile, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
+from ..clients.minio_client import MinioPutError, put_object_bytes
 from ..config import get_settings
 from ..database import get_session
 from ..models import Run, RunImage, RunImageApproval, RunImageStatus, RunStatus
 from ..schemas import (
     RunCreate,
+    RunGenerateMoreImages,
     RunImageApprovalRequest,
     RunImageApprovalResponse,
     RunImageCreate,
@@ -362,6 +364,90 @@ def add_run_images(
     return run
 
 
+@router.post("/{run_id}/images/upload", response_model=RunRead)
+async def upload_run_image(
+    run_id: str,
+    ordinal: int = Query(..., ge=0, description="Ordinal position of the image"),
+    file: UploadFile = File(..., description="Image file to upload"),
+    x_machine_id: str | None = Header(default=None, alias="X-Machine-Id"),
+    session: Session = Depends(get_session),
+) -> Run:
+    """
+    Upload an image for a run.
+    
+    Accepts a file upload, stores it in MinIO, and creates a RunImage record.
+    """
+    run = _get_run(session, run_id)
+    
+    # Read the uploaded file
+    try:
+        file_contents = await file.read()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Failed to read uploaded file: {exc}",
+        ) from exc
+    
+    if not file_contents:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Uploaded file is empty",
+        )
+    
+    # Generate object name: runs/{run_id}/{timestamp}_{ordinal}.png
+    timestamp = int(datetime.utcnow().timestamp())
+    file_extension = "png"  # Default to png
+    if file.filename:
+        # Extract extension from filename
+        parts = file.filename.rsplit(".", 1)
+        if len(parts) > 1:
+            file_extension = parts[1].lower()
+    
+    object_name = f"runs/{run_id}/{timestamp}_{ordinal}.{file_extension}"
+    
+    # Upload to MinIO
+    settings = get_settings()
+    try:
+        put_object_bytes(
+            object_name=object_name,
+            data=file_contents,
+            content_type=file.content_type or "image/png",
+            bucket=settings.minio_bucket,
+        )
+    except MinioPutError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to upload image to storage: {exc}",
+        ) from exc
+    
+    # Build asset_uri - use public endpoint if configured, otherwise use endpoint
+    if settings.minio_public_endpoint:
+        asset_uri = f"{settings.minio_public_endpoint}/{settings.minio_bucket}/{object_name}"
+    else:
+        asset_uri = f"{settings.minio_endpoint}/{settings.minio_bucket}/{object_name}"
+    
+    # Create RunImage record
+    run_image = RunImage(
+        run_id=run_id,
+        ordinal=ordinal,
+        asset_uri=asset_uri,
+        generated_by_machine_id=x_machine_id,
+        status=RunImageStatus.GENERATED,
+    )
+    session.add(run_image)
+    
+    # Update run status if needed
+    if run.status == RunStatus.QUEUED:
+        run.status = RunStatus.GENERATING
+    
+    run.updated_at = datetime.utcnow()
+    session.add(run)
+    session.commit()
+    session.refresh(run)
+    
+    return run
+
+
 @router.post("/{run_id}/images/{image_id}/approve", response_model=RunImageApprovalResponse)
 def approve_run_image(
     run_id: str,
@@ -397,3 +483,84 @@ def approve_run_image(
         image_id=image.id,
         webhook_status=approval.webhook_status.value,
     )
+
+
+@router.post("/{run_id}/images/{image_id}/reject", response_model=RunRead)
+def reject_run_image(
+    run_id: str,
+    image_id: str,
+    payload: RunImageApprovalRequest,
+    session: Session = Depends(get_session),
+) -> Run:
+    """
+    Reject a run image.
+    
+    Sets the image status to REJECTED and updates the run status if needed.
+    """
+    image = _get_run_image(session, run_id, image_id)
+    image.status = RunImageStatus.REJECTED
+    image.notes = payload.notes or image.notes
+    image.run.updated_at = datetime.utcnow()
+    
+    # Check if all images in the run are rejected or approved
+    all_images_stmt = (
+        select(RunImage)
+        .where(RunImage.run_id == run_id)
+    )
+    all_images = session.execute(all_images_stmt).scalars().all()
+    
+    has_generated = any(img.status == RunImageStatus.GENERATED for img in all_images)
+    has_approved = any(img.status == RunImageStatus.APPROVED for img in all_images)
+    
+    # Update run status based on image states
+    if not has_generated and not has_approved:
+        # All images are either rejected or posted
+        image.run.status = RunStatus.POSTED
+    elif not has_generated and has_approved:
+        # All generated images are processed, some approved
+        image.run.status = RunStatus.APPROVED
+    
+    session.add(image)
+    session.commit()
+    session.refresh(image.run)
+    return image.run
+
+
+@router.post("/{run_id}/generate-more", response_model=RunRead)
+def generate_more_images(
+    run_id: str,
+    payload: RunGenerateMoreImages,
+    session: Session = Depends(get_session),
+) -> Run:
+    """
+    Request to generate additional images for a run.
+    
+    This endpoint updates the run's parameter_blob to request more images.
+    The actual generation is handled by the image generator worker.
+    """
+    run = _get_run(session, run_id)
+    
+    # Update parameter_blob to include the additional image count request
+    if run.parameter_blob is None:
+        run.parameter_blob = {}
+    
+    if not isinstance(run.parameter_blob, dict):
+        run.parameter_blob = {}
+    
+    # Get current image count or default to 0
+    current_count = run.parameter_blob.get("image_count", 0)
+    
+    # Update to request additional images
+    run.parameter_blob["image_count"] = current_count + payload.additional_count
+    run.parameter_blob["generate_more"] = True  # Flag to indicate this is a generate-more request
+    
+    # Reset status to QUEUED if it's not already queued or generating
+    if run.status not in [RunStatus.QUEUED, RunStatus.GENERATING]:
+        run.status = RunStatus.QUEUED
+        run.leased_until = None
+    
+    run.updated_at = datetime.utcnow()
+    session.add(run)
+    session.commit()
+    session.refresh(run)
+    return run
