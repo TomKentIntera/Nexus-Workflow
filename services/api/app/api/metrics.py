@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta
+
 from fastapi import APIRouter, Depends
 from fastapi.responses import PlainTextResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..database import get_session
-from ..models import Run, RunImage, RunImageStatus, RunStatus
+from ..models import ImageGenerationStat, Run, RunImage, RunImageStatus, RunStatus
 
 router = APIRouter(tags=["metrics"])
 
@@ -55,12 +57,23 @@ def metrics(session: Session = Depends(get_session)) -> PlainTextResponse:
     )
     runs_need_review = int(session.execute(runs_need_review_stmt).scalar_one() or 0)
 
+    last_hour_cutoff = datetime.utcnow() - timedelta(hours=1)
+    images_last_hour_stmt = (
+        select(func.count())
+        .select_from(ImageGenerationStat)
+        .where(ImageGenerationStat.generated_at >= last_hour_cutoff)
+    )
+    images_generated_last_hour = int(session.execute(images_last_hour_stmt).scalar_one() or 0)
+
     lines = [
         "# HELP workflow_images_total Count of images by state.",
         "# TYPE workflow_images_total gauge",
         _format_metric("workflow_images_total", approved_count, {"state": "approved"}),
         _format_metric("workflow_images_total", posted_count, {"state": "posted"}),
         _format_metric("workflow_images_total", scheduled_count, {"state": "scheduled"}),
+        "# HELP workflow_images_generated_last_hour Count of images generated in the last hour.",
+        "# TYPE workflow_images_generated_last_hour gauge",
+        _format_metric("workflow_images_generated_last_hour", images_generated_last_hour),
         "# HELP workflow_runs_need_review Number of runs needing review.",
         "# TYPE workflow_runs_need_review gauge",
         _format_metric("workflow_runs_need_review", runs_need_review),
