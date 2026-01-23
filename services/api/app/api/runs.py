@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session, selectinload
 from ..clients.minio_client import MinioPutError, put_object_bytes
 from ..config import get_settings
 from ..database import get_session
-from ..models import Run, RunImage, RunImageApproval, RunImageStatus, RunStatus
+from ..models import ImageGenerationStat, Run, RunImage, RunImageApproval, RunImageStatus, RunStatus
 from ..schemas import (
     RunCreate,
     RunGenerateMoreImages,
@@ -140,12 +140,21 @@ def create_run(payload: RunCreate, session: Session = Depends(get_session)) -> R
     )
 
     for image in payload.images:
+        generated_at = datetime.utcnow()
         run.images.append(
             RunImage(
                 ordinal=image.ordinal,
                 asset_uri=image.asset_uri,
                 thumb_uri=image.thumb_uri,
+                generated_by_machine_id=image.generated_by_machine_id,
                 notes=image.notes,
+                created_at=generated_at,
+            )
+        )
+        session.add(
+            ImageGenerationStat(
+                generated_at=generated_at,
+                machine_id=image.generated_by_machine_id,
             )
         )
 
@@ -349,12 +358,21 @@ def add_run_images(
 ) -> Run:
     run = _get_run(session, run_id)
     for image in payload:
+        generated_at = datetime.utcnow()
         run.images.append(
             RunImage(
                 ordinal=image.ordinal,
                 asset_uri=image.asset_uri,
                 thumb_uri=image.thumb_uri,
+                generated_by_machine_id=image.generated_by_machine_id,
                 notes=image.notes,
+                created_at=generated_at,
+            )
+        )
+        session.add(
+            ImageGenerationStat(
+                generated_at=generated_at,
+                machine_id=image.generated_by_machine_id,
             )
         )
     run.updated_at = datetime.utcnow()
@@ -395,7 +413,8 @@ async def upload_run_image(
         )
     
     # Generate object name: runs/{run_id}/{timestamp}_{ordinal}.png
-    timestamp = int(datetime.utcnow().timestamp())
+    generated_at = datetime.utcnow()
+    timestamp = int(generated_at.timestamp())
     file_extension = "png"  # Default to png
     if file.filename:
         # Extract extension from filename
@@ -433,8 +452,15 @@ async def upload_run_image(
         asset_uri=asset_uri,
         generated_by_machine_id=x_machine_id,
         status=RunImageStatus.GENERATED,
+        created_at=generated_at,
     )
     session.add(run_image)
+    session.add(
+        ImageGenerationStat(
+            generated_at=generated_at,
+            machine_id=x_machine_id,
+        )
+    )
     
     # Update run status if needed
     if run.status == RunStatus.QUEUED:
