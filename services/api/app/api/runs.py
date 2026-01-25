@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import random
 from datetime import date, datetime, time, timedelta
 from typing import List, Sequence
@@ -46,6 +47,28 @@ def _get_run_image(session: Session, run_id: str, image_id: str) -> RunImage:
     if not result:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run image not found")
     return result
+
+
+def _coerce_parameter_blob(blob: object | None) -> dict:
+    if blob is None:
+        return {}
+    if isinstance(blob, dict):
+        return blob
+    if isinstance(blob, str):
+        try:
+            parsed = json.loads(blob)
+        except (TypeError, ValueError):
+            return {}
+        if isinstance(parsed, dict):
+            return parsed
+    return {}
+
+
+def _coerce_int(value: object, default: int) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
 
 
 def _parse_window_time(value: str, label: str) -> time:
@@ -233,10 +256,9 @@ def lease_run(session: Session = Depends(get_session)):
     images_stmt = select(func.count()).select_from(RunImage).where(RunImage.run_id == run.id)
     generated_images = int(session.execute(images_stmt).scalar_one() or 0)
     
-    # Determine image_count from parameter_blob or default to 1
-    image_count = 1
-    if run.parameter_blob and isinstance(run.parameter_blob, dict):
-        image_count = run.parameter_blob.get("image_count", 1)
+    # Determine image_count from parameter_blob (supports JSON strings)
+    parameter_blob = _coerce_parameter_blob(run.parameter_blob)
+    image_count = _coerce_int(parameter_blob.get("image_count"), default=1)
     
     remaining_images = max(0, image_count - generated_images)
     
@@ -567,18 +589,16 @@ def generate_more_images(
     run = _get_run(session, run_id)
     
     # Update parameter_blob to include the additional image count request
-    if run.parameter_blob is None:
-        run.parameter_blob = {}
-    
-    if not isinstance(run.parameter_blob, dict):
-        run.parameter_blob = {}
-    
-    # Get current image count or default to 0
-    current_count = run.parameter_blob.get("image_count", 0)
-    
+    parameter_blob = _coerce_parameter_blob(run.parameter_blob)
+    current_count = _coerce_int(parameter_blob.get("image_count"), default=0)
+    generated_count = len(run.images)
+    if current_count < generated_count:
+        current_count = generated_count
+
     # Update to request additional images
-    run.parameter_blob["image_count"] = current_count + payload.additional_count
-    run.parameter_blob["generate_more"] = True  # Flag to indicate this is a generate-more request
+    parameter_blob["image_count"] = current_count + payload.additional_count
+    parameter_blob["generate_more"] = True  # Flag to indicate this is a generate-more request
+    run.parameter_blob = parameter_blob
     
     # Reset status to QUEUED if it's not already queued or generating
     if run.status not in [RunStatus.QUEUED, RunStatus.GENERATING]:
