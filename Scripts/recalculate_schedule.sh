@@ -3,181 +3,69 @@ set -euo pipefail
 
 # Recalculate scheduled_time for approved images.
 #
+# This script runs a Python script in the API container that uses the same
+# scheduling logic as the API to ensure consistency. It applies random delays
+# between WF_SCHEDULE_DELAY_MIN and WF_SCHEDULE_DELAY_MAX between consecutive
+# images, while respecting the posting window and max posts per day.
+#
 # Configuration is read from the API .env:
 #   WF_MAX_POSTS_PER_DAY
 #   WF_POSTING_WINDOW_START
 #   WF_POSTING_WINDOW_END
+#   WF_SCHEDULE_DELAY_MIN
+#   WF_SCHEDULE_DELAY_MAX
 #
 # Run:
-#   ./Scripts/recalculate_schedule.sh
+#   ./Scripts/recalculate_schedule.sh [--dry-run]
+#
+# Options:
+#   --dry-run, -n    Show what would happen without updating the database
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+COMPOSE_FILE="${ROOT_DIR}/docker-compose.yml"
 
-# Optional: status value for approved images (matches DB enum).
-APPROVED_STATUS="APPROVED"
+if [[ ! -f "${COMPOSE_FILE}" ]]; then
+  echo "docker-compose.yml not found at ${COMPOSE_FILE}" >&2
+  exit 1
+fi
 
-API_ENV_FILE="${ROOT_DIR}/services/api/.env"
+# Check if API service is running
+if ! docker compose -f "${COMPOSE_FILE}" ps api | grep -q "Up"; then
+  echo "⚠️  API service is not running. Starting it..."
+  docker compose -f "${COMPOSE_FILE}" up -d api
+  echo "Waiting for API service to be healthy..."
+  sleep 5
+fi
 
-load_env_value() {
-  local key="$1"
-  local file="$2"
-  if [[ -n "${!key:-}" ]]; then
-    return 0
+# Copy the Python script into the container
+RECALC_SCRIPT="${ROOT_DIR}/services/api/recalculate_schedule.py"
+if [[ ! -f "${RECALC_SCRIPT}" ]]; then
+  echo "Error: recalculate_schedule.py not found at ${RECALC_SCRIPT}" >&2
+  exit 1
+fi
+
+# Change to root directory to use relative paths (avoids Windows path issues)
+cd "${ROOT_DIR}"
+
+# Copy using relative path from docker-compose.yml location
+docker compose -f docker-compose.yml cp services/api/recalculate_schedule.py api:/app/recalculate_schedule.py
+
+# Pass through arguments (--dry-run or -n)
+echo "Running schedule recalculation..."
+
+# Build the command - check if dry-run was requested
+DRY_RUN_ARG=""
+for arg in "$@"; do
+  if [[ "${arg}" == "--dry-run" ]] || [[ "${arg}" == "-n" ]]; then
+    DRY_RUN_ARG="--dry-run"
+    break
   fi
-  if [[ ! -f "${file}" ]]; then
-    return 0
-  fi
-  local line=""
-  line="$(grep -E "^${key}=" "${file}" | head -n 1 || true)"
-  if [[ -z "${line}" ]]; then
-    return 0
-  fi
-  local value="${line#${key}=}"
-  value="${value%\"}"
-  value="${value#\"}"
-  value="${value%\'}"
-  value="${value#\'}"
-  printf -v "${key}" "%s" "${value}"
-  export "${key}"
-}
+done
 
-if ! command -v mysql >/dev/null 2>&1; then
-  echo "mysql client not found. Install it or run from a machine with mysql CLI." >&2
-  exit 1
+# Execute in container - change to /app first, then run with relative path
+if [[ -n "${DRY_RUN_ARG}" ]]; then
+  docker compose -f docker-compose.yml exec -T api sh -c "cd /app && python recalculate_schedule.py --dry-run"
+else
+  docker compose -f docker-compose.yml exec -T api sh -c "cd /app && python recalculate_schedule.py"
 fi
-
-if [[ -f "${API_ENV_FILE}" ]]; then
-  load_env_value "WF_DATABASE_URL" "${API_ENV_FILE}"
-  load_env_value "WF_MAX_POSTS_PER_DAY" "${API_ENV_FILE}"
-  load_env_value "WF_POSTING_WINDOW_START" "${API_ENV_FILE}"
-  load_env_value "WF_POSTING_WINDOW_END" "${API_ENV_FILE}"
-fi
-
-max_posts_per_day="${WF_MAX_POSTS_PER_DAY:-}"
-window_start="${WF_POSTING_WINDOW_START:-}"
-window_end="${WF_POSTING_WINDOW_END:-}"
-
-if [[ -z "${WF_DATABASE_URL:-}" ]]; then
-  echo "WF_DATABASE_URL is not set. Export it or add it to services/api/.env." >&2
-  exit 1
-fi
-
-if [[ -z "${max_posts_per_day}" ]]; then
-  echo "WF_MAX_POSTS_PER_DAY is not set in services/api/.env." >&2
-  exit 1
-fi
-
-if [[ -z "${window_start}" ]]; then
-  echo "WF_POSTING_WINDOW_START is not set in services/api/.env." >&2
-  exit 1
-fi
-
-if [[ -z "${window_end}" ]]; then
-  echo "WF_POSTING_WINDOW_END is not set in services/api/.env." >&2
-  exit 1
-fi
-
-if [[ "${max_posts_per_day}" -le 0 ]]; then
-  echo "WF_MAX_POSTS_PER_DAY must be > 0." >&2
-  exit 1
-fi
-
-if [[ ! "${window_start}" =~ ^[0-2][0-9]:[0-5][0-9](:[0-5][0-9])?$ ]]; then
-  echo "WF_POSTING_WINDOW_START must be HH:MM or HH:MM:SS." >&2
-  exit 1
-fi
-
-if [[ ! "${window_end}" =~ ^[0-2][0-9]:[0-5][0-9](:[0-5][0-9])?$ ]]; then
-  echo "WF_POSTING_WINDOW_END must be HH:MM or HH:MM:SS." >&2
-  exit 1
-fi
-
-if [[ "${window_end}" <= "${window_start}" ]]; then
-  echo "WF_POSTING_WINDOW_END must be later than START." >&2
-  exit 1
-fi
-
-db_url="${WF_DATABASE_URL}"
-db_url="${db_url#*://}"
-db_url="${db_url%%\?*}"
-
-userpass_hostdb="${db_url%%/*}"
-dbname="${db_url#*/}"
-dbname="${dbname%%\?*}"
-
-userpass="${userpass_hostdb%@*}"
-hostport="${userpass_hostdb#*@}"
-
-db_user="${userpass%%:*}"
-db_pass="${userpass#*:}"
-
-db_host="${hostport%%:*}"
-db_port="${hostport#*:}"
-if [[ "${db_port}" == "${db_host}" ]]; then
-  db_port="3306"
-fi
-
-mysql_args=(
-  --protocol=TCP
-  --host="${db_host}"
-  --port="${db_port}"
-  --user="${db_user}"
-  --password="${db_pass}"
-  --database="${dbname}"
-  --batch
-  --skip-column-names
-)
-
-read -r scheduled_count start_date <<<"$(
-  mysql "${mysql_args[@]}" -e \
-    "SELECT COUNT(*), DATE(MIN(scheduled_time))
-     FROM run_images
-     WHERE status = '${APPROVED_STATUS}'
-       AND scheduled_time IS NOT NULL;"
-)"
-
-if [[ "${scheduled_count}" -eq 0 ]]; then
-  echo "No approved scheduled images found. Nothing to do."
-  exit 0
-fi
-
-if [[ -z "${start_date}" || "${start_date}" == "NULL" ]]; then
-  echo "Unable to determine start date from scheduled images." >&2
-  exit 1
-fi
-
-echo "Found ${scheduled_count} approved scheduled images."
-echo "Scheduling ${max_posts_per_day}/day between ${window_start}-${window_end}."
-echo "Start date: ${start_date}"
-
-mysql "${mysql_args[@]}" <<SQL
-SET @images_per_day := ${max_posts_per_day};
-SET @window_start := '${window_start}';
-SET @window_end := '${window_end}';
-SET @start_date := '${start_date}';
-SET @interval_seconds := TIMESTAMPDIFF(
-  SECOND,
-  CONCAT('2000-01-01 ', @window_start),
-  CONCAT('2000-01-01 ', @window_end)
-) / @images_per_day;
-
-UPDATE run_images AS ri
-JOIN (
-  SELECT id,
-         ROW_NUMBER() OVER (ORDER BY scheduled_time ASC, id ASC) - 1 AS idx
-  FROM run_images
-  WHERE status = '${APPROVED_STATUS}'
-    AND scheduled_time IS NOT NULL
-) AS ordered
-  ON ordered.id = ri.id
-SET ri.scheduled_time = DATE_ADD(
-  TIMESTAMP(
-    DATE_ADD(@start_date, INTERVAL FLOOR(ordered.idx / @images_per_day) DAY),
-    @window_start
-  ),
-  INTERVAL FLOOR(@interval_seconds * (ordered.idx % @images_per_day)) SECOND
-);
-SQL
-
-echo "Recalculation complete."
