@@ -614,8 +614,9 @@ def generate_more_images(
     """
     run = _get_run(session, run_id)
     
-    # Update parameter_blob to include the additional image count request
-    parameter_blob = _coerce_parameter_blob(run.parameter_blob)
+    # Update parameter_blob to include the additional image count request.
+    # Copy to ensure SQLAlchemy detects JSON changes.
+    parameter_blob = dict(_coerce_parameter_blob(run.parameter_blob))
     current_count = _coerce_int(parameter_blob.get("image_count"), default=0)
     generated_count = len(run.images)
     if current_count < generated_count:
