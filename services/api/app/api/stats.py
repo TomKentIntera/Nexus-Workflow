@@ -58,6 +58,7 @@ def reviewer_summary(session: Session = Depends(get_session)) -> dict[str, Any]:
     - runs_need_review: runs with at least one GENERATED image (not yet approved/rejected/posted)
     - images_generated_last_hour: images created in the last 60 minutes
     - last_scheduled_post_time: the latest scheduled_time from approved/posted images
+    - queued_runs: number of runs with status QUEUED (allows n8n to determine if it needs to queue more)
     """
     now = datetime.utcnow()
     cutoff = now - timedelta(hours=1)
@@ -91,6 +92,14 @@ def reviewer_summary(session: Session = Depends(get_session)) -> dict[str, Any]:
     )
     images_generated_last_hour = int(session.execute(images_last_hour_stmt).scalar_one() or 0)
 
+    # Count queued runs
+    queued_runs_stmt = (
+        select(func.count())
+        .select_from(Run)
+        .where(Run.status == RunStatus.QUEUED)
+    )
+    queued_runs = int(session.execute(queued_runs_stmt).scalar_one() or 0)
+
     # Get the latest scheduled_time from approved or posted images
     last_scheduled_stmt = (
         select(func.max(RunImage.scheduled_time))
@@ -107,6 +116,7 @@ def reviewer_summary(session: Session = Depends(get_session)) -> dict[str, Any]:
         "posted_images": posted_images,
         "runs_need_review": runs_need_review,
         "images_generated_last_hour": images_generated_last_hour,
+        "queued_runs": queued_runs,
     }
     
     if last_scheduled_post_time:

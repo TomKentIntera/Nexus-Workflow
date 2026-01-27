@@ -209,7 +209,33 @@ def list_runs(
     if status_filter:
         stmt = stmt.where(Run.status == status_filter)
     runs: Sequence[Run] = session.execute(stmt).unique().scalars().all()
-    return RunList(runs=runs)
+    
+    # Count queued runs
+    # Count all runs with status QUEUED, including those that might be leased
+    # This ensures we get an accurate count regardless of lease status
+    queued_count_stmt = (
+        select(func.count(Run.id))
+        .select_from(Run)
+        .where(Run.status == RunStatus.QUEUED)
+    )
+    queued_count_result = session.execute(queued_count_stmt).scalar_one()
+    queued_count = int(queued_count_result) if queued_count_result is not None else 0
+    
+    # Count images generated in the last hour
+    now = datetime.utcnow()
+    last_hour_cutoff = now - timedelta(hours=1)
+    images_last_hour_stmt = (
+        select(func.count())
+        .select_from(ImageGenerationStat)
+        .where(ImageGenerationStat.generated_at >= last_hour_cutoff)
+    )
+    images_generated_last_hour = int(session.execute(images_last_hour_stmt).scalar_one() or 0)
+    
+    return RunList(
+        runs=runs,
+        queued_count=queued_count,
+        images_generated_last_hour=images_generated_last_hour,
+    )
 
 
 @router.post("/lease", response_model=None, status_code=status.HTTP_200_OK)

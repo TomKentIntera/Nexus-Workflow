@@ -57,6 +57,17 @@ def metrics(session: Session = Depends(get_session)) -> PlainTextResponse:
     )
     runs_need_review = int(session.execute(runs_need_review_stmt).scalar_one() or 0)
 
+    # Count runs by status
+    runs_by_status_stmt = (
+        select(Run.status, func.count())
+        .select_from(Run)
+        .group_by(Run.status)
+    )
+    runs_by_status = {
+        row.status: int(row.count)
+        for row in session.execute(runs_by_status_stmt).all()
+    }
+
     now = datetime.utcnow()
     
     # Total images generated (counter for rate calculations)
@@ -131,7 +142,14 @@ def metrics(session: Session = Depends(get_session)) -> PlainTextResponse:
         "# HELP workflow_runs_need_review Number of runs needing review.",
         "# TYPE workflow_runs_need_review gauge",
         _format_metric("workflow_runs_need_review", runs_need_review),
+        "# HELP workflow_runs_total Count of runs by status.",
+        "# TYPE workflow_runs_total gauge",
     ])
+    
+    # Add runs metrics with status labels for Grafana faceting
+    for status in RunStatus:
+        count = runs_by_status.get(status, 0)
+        lines.append(_format_metric("workflow_runs_total", count, {"status": status.value}))
     
     payload = "\n".join(lines) + "\n"
     return PlainTextResponse(payload, media_type="text/plain; version=0.0.4")
