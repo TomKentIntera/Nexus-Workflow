@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session, selectinload
 from ..clients.minio_client import MinioPutError, put_object_bytes
 from ..config import get_settings
 from ..database import get_session
-from ..models import ImageGenerationStat, Run, RunImage, RunImageApproval, RunImageStatus, RunStatus
+from ..models import ImageGenerationStat, NegativePromptWord, Run, RunImage, RunImageApproval, RunImageStatus, RunStatus
 from ..schemas import (
     RunCreate,
     RunGenerateMoreImages,
@@ -288,6 +288,11 @@ def lease_run(session: Session = Depends(get_session)):
     
     remaining_images = max(0, image_count - generated_images)
     
+    # Fetch negative prompt words from database
+    negative_prompt_words = session.execute(
+        select(NegativePromptWord.word).order_by(NegativePromptWord.word.asc())
+    ).scalars().all()
+    
     return RunLeaseResponse(
         id=run.id,
         workflow_id=run.workflow_id,
@@ -297,6 +302,7 @@ def lease_run(session: Session = Depends(get_session)):
         generated_images=generated_images,
         remaining_images=remaining_images,
         leased_until=lease_until,
+        negative_prompt_words=[str(w) for w in negative_prompt_words],
     )
 
 

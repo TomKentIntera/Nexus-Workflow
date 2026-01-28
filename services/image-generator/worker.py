@@ -297,9 +297,25 @@ def process_queued_runs() -> None:
 
             width = int(parameters.get("width", 1024))
             height = int(parameters.get("height", 1024))
-            negative_prompt = parameters.get(
+            base_negative_prompt = parameters.get(
                 "negative_prompt", DEFAULT_NEGATIVE_PROMPT
             )
+            
+            # Append negative prompt words from lease response
+            negative_prompt_words = leased.get("negative_prompt_words", [])
+            if negative_prompt_words and isinstance(negative_prompt_words, list):
+                # Combine base negative prompt with additional words
+                additional_words = ", ".join(str(w) for w in negative_prompt_words if w)
+                if additional_words:
+                    if base_negative_prompt:
+                        negative_prompt = f"{base_negative_prompt}, {additional_words}"
+                    else:
+                        negative_prompt = additional_words
+                else:
+                    negative_prompt = base_negative_prompt
+            else:
+                negative_prompt = base_negative_prompt
+            
             num_inference_steps = int(parameters.get("steps", 28))
             guidance_scale = float(parameters.get("guidance", 7.5))
             seed = parameters.get("seed")
@@ -310,7 +326,8 @@ def process_queued_runs() -> None:
             watermark_width = int(parameters.get("watermark_width", 300))
 
             print(f"📋 Leased run: {run_id}")
-            print(f"   Prompt: {prompt[:100]}...")
+            print(f"   Prompt: {prompt}")
+            print(f"   Negative Prompt: {negative_prompt}")
             print(f"   Progress: {generated}/{requested} (remaining: {num_images})")
             print(f"   Generating {num_images} image(s) at {width}x{height}...")
 

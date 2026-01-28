@@ -92,6 +92,7 @@ class RunLeaseResponse(BaseModel):
     generated_images: int = Field(default=0, ge=0, description="Number of images already uploaded for this run")
     remaining_images: int = Field(default=1, ge=0, description="Number of images remaining to generate/upload")
     leased_until: Optional[datetime] = None
+    negative_prompt_words: List[str] = Field(default_factory=list, description="Additional negative prompt words to append")
 
 
 class LinkSubmissionCreate(BaseModel):

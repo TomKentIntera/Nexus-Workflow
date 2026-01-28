@@ -163,3 +163,21 @@ class AllowedSearchTag(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow
     )
+
+
+class NegativePromptWord(Base):
+    """
+    Words/phrases to append to negative prompts during image generation.
+    
+    These are appended to the base negative prompt to allow dynamic
+    updates without rebuilding the image generator service.
+    """
+
+    __tablename__ = "negative_prompt_words"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    word: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow
+    )

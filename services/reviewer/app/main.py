@@ -824,6 +824,57 @@ async def delete_banned_tag(tag: str) -> List[str]:
         raise HTTPException(status_code=502, detail=f"Failed to delete banned tag: {exc}")
 
 
+@app.get("/api/negative-prompt-words", tags=["api"])
+async def list_negative_prompt_words() -> List[str]:
+    """Proxy negative-prompt-words list from API service."""
+    try:
+        async with _api_client() as client:
+            response = await client.get("/negative-prompt-words")
+            response.raise_for_status()
+            return response.json()
+    except httpx.ConnectError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Cannot connect to API service at {settings.api_base_url}. Is the API service running?",
+        )
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to fetch negative prompt words: {exc}")
+
+
+@app.post("/api/negative-prompt-words", tags=["api"])
+async def add_negative_prompt_words(payload: List[str]) -> List[str]:
+    """Proxy add-negative-prompt-words to API service."""
+    try:
+        async with _api_client() as client:
+            response = await client.post("/negative-prompt-words", json=payload)
+            response.raise_for_status()
+            return response.json()
+    except httpx.ConnectError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Cannot connect to API service at {settings.api_base_url}. Is the API service running?",
+        )
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to add negative prompt words: {exc}")
+
+
+@app.delete("/api/negative-prompt-words/{word}", tags=["api"])
+async def delete_negative_prompt_word(word: str) -> List[str]:
+    """Proxy delete-negative-prompt-word to API service."""
+    try:
+        async with _api_client() as client:
+            response = await client.delete(f"/negative-prompt-words/{word}")
+            response.raise_for_status()
+            return response.json()
+    except httpx.ConnectError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Cannot connect to API service at {settings.api_base_url}. Is the API service running?",
+        )
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to delete negative prompt word: {exc}")
+
+
 @app.get("/api/allowed-search-tags", tags=["api"])
 async def list_allowed_search_tags() -> List[Dict]:
     """Proxy allowed-search-tags list from API service."""
